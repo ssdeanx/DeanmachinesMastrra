@@ -1,7 +1,13 @@
 # Tool Fails
 
-- "calculator", // semi-works doesnt provide an answer just a response
+- "calculator", // breaks agents, TypeNames are not correct, needs fixed in zod2jsonschema
 - "memory-query" // breaks agents, when used they can respond,  need to be removed from agent tools or refactored
+"calculate-reward",
+"define-reward-function",
+"optimize-policy"
+"llm-chain",
+"google-search",
+"exa_search",
 
 ## testing
 
@@ -25,6 +31,91 @@
 - 'google_drive_create_folder', // needs checked if output schema patched
 - 'google_docs_get_document', // needs checked if output schema patched
 - "execute_python", // might work, pretty sure it does but not tested yet, could use typescript tool as well
+
+
+"token-count-eval",
+"completeness-eval",
+"content-similarity-eval",
+"answer-relevancy-eval",
+"context-precision-eval",
+"context-position-eval"
+"tone-consistency-eval",
+"keyword-coverage-eval",
+"textual-difference-eval",
+"faithfulness-eval",
+"bias-eval",
+"toxicity-eval",
+"hallucination-eval",
+"summarization-eval",
+
+
+
+## working but careful one breakage when used in agents & checking traces
+
+"format-content",
+    "search-documents",
+    "read-file",
+    "write-file",
+    "collect-feedback",
+    "brave-search",
+    "github_get_user_by_username",
+    "github_search_repositories",
+    "github_list_user_repos",
+    "github_get_repo",
+    "github_search_code",
+    "read-knowledge-file",
+    "write-knowledge-file",
+    "arxiv_search",
+    "bias-eval",
+    "toxicity-eval",
+    "hallucination-eval",
+    "summarization-eval",
+    "token-count-eval",
+    "completeness-eval",
+    "content-similarity-eval",
+    "answer-relevancy-eval",
+    "context-precision-eval",
+    "create-graph-rag",
+    "graph-rag-query",
+    "execute_python",
+    "wikipedia_get_page_summary",
+    "vector-query",
+    "google-vector-query",
+    "filtered-vector-query",
+    "tavily-search",
+    
+## 100% working
+
+    ```ts
+    "read-file", // Corrected ID
+    "write-file", // Corrected ID
+    "tavily-search", // Specific search tool
+    "brave-search", // Specific search tool
+    "vector-query", // Specific vector tool
+    "google-vector-query", // Specific vector tool
+    "filtered-vector-query", // Specific vector tool
+    "search-documents", // Specific document tool
+    "github_search_repositories",
+    "github_list_user_repos",
+    "github_get_repo",
+    "github_search_code",
+    "read-knowledge-file",
+    "write-knowledge-file",
+    "arxiv_search",
+    "bias-eval",
+    "toxicity-eval",
+    "hallucination-eval",
+    "summarization-eval",
+    "token-count-eval",
+    "create-graph-rag",
+    "graph-rag-query",
+    "execute_python",
+    "wikipedia_get_page_summary",
+    "context-precision-eval",
+    "embed-document",
+    ```
+
+
 
 ## Troubleshooting `zod2jsonschema` Issues
 

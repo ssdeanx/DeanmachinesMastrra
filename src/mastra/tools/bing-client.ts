@@ -7,7 +7,7 @@ import {
 } from '@agentic/core'
 import defaultKy, { type KyInstance } from 'ky'
 import { z } from 'zod'
-
+import { createMastraTools } from "@agentic/mastra";
 export namespace bing {
   export const API_BASE_URL = 'https://api.bing.microsoft.com'
 

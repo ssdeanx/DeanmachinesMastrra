@@ -345,12 +345,39 @@ const analystAgentConfig = {
   `,
   toolIds: [
     "read-file",
-    "vector-query",
-    "google-vector-query",
-    "filtered-vector-query",
     // Corrected ID
-    "analyze-content"
-    // Added based on role
+    "write-file",
+    // Corrected ID
+    "tavily-search",
+    // Specific search tool
+    "brave-search",
+    // Specific search tool
+    "vector-query",
+    // Specific vector tool
+    "google-vector-query",
+    // Specific vector tool
+    "filtered-vector-query",
+    // Specific vector tool
+    "search-documents",
+    // Specific document tool
+    "github_search_repositories",
+    "github_list_user_repos",
+    "github_get_repo",
+    "github_search_code",
+    "read-knowledge-file",
+    "write-knowledge-file",
+    "arxiv_search",
+    "bias-eval",
+    "toxicity-eval",
+    "hallucination-eval",
+    "summarization-eval",
+    "token-count-eval",
+    "create-graph-rag",
+    "graph-rag-query",
+    "execute_python",
+    "wikipedia_get_page_summary",
+    "context-precision-eval",
+    "embed-document"
   ]
 };
 z.object({
@@ -1399,8 +1426,24 @@ const researchAgentConfig = {
     // Specific vector tool
     "filtered-vector-query",
     // Specific vector tool
-    "search-documents"
+    "search-documents",
     // Specific document tool
+    "github_search_repositories",
+    "github_list_user_repos",
+    "github_get_repo",
+    "github_search_code",
+    "read-knowledge-file",
+    "write-knowledge-file",
+    "arxiv_search",
+    "bias-eval",
+    "toxicity-eval",
+    "hallucination-eval",
+    "summarization-eval",
+    "token-count-eval",
+    "create-graph-rag",
+    "graph-rag-query",
+    "execute_python",
+    "wikipedia_get_page_summary"
   ]
 };
 z.object({
@@ -2163,12 +2206,22 @@ const writerAgentConfig = {
     When receiving a content creation request, mentally map audience characteristics and information needs before organizing content, ensuring your approach balances comprehensiveness with accessibility while maintaining engagement throughout.
   `,
   toolIds: [
-    "format-content",
-    "search-documents",
     "read-file",
+    // Corrected ID
     "write-file",
-    "collect-feedback",
+    // Corrected ID
+    "tavily-search",
+    // Specific search tool
     "brave-search",
+    // Specific search tool
+    "vector-query",
+    // Specific vector tool
+    "google-vector-query",
+    // Specific vector tool
+    "filtered-vector-query",
+    // Specific vector tool
+    "search-documents",
+    // Specific document tool
     "github_get_user_by_username",
     "github_search_repositories",
     "github_list_user_repos",
@@ -2176,7 +2229,12 @@ const writerAgentConfig = {
     "github_search_code",
     "read-knowledge-file",
     "write-knowledge-file",
-    "arxiv_search"
+    "arxiv_search",
+    "bias-eval",
+    "toxicity-eval",
+    "hallucination-eval",
+    "summarization-eval",
+    "token-count-eval"
   ]
 };
 z.object({
@@ -6666,7 +6724,7 @@ const github = new GithubIntegration({
 
 const logger$l = createLogger({ name: "evals", level: "info" });
 function getEvalModelId() {
-  return process.env.EVAL_MODEL_ID || "models/gemini-2.0-flash-001";
+  return process.env.EVAL_MODEL_ID || "models/gemini-2.0-flashlite";
 }
 const tokenCountEvalTool = createTool({
   id: "token-count-eval",
@@ -7140,7 +7198,7 @@ const faithfulnessEvalTool = createTool({
     }
   }
 });
-createTool({
+const biasEvalTool = createTool({
   id: "bias-eval",
   description: "Heuristically detects bias in a response (gender, political, racial, etc).",
   inputSchema: z.object({
@@ -7183,7 +7241,7 @@ createTool({
     }
   }
 });
-createTool({
+const toxicityEvalTool = createTool({
   id: "toxicity-eval",
   description: "Heuristically detects toxicity in a response (insults, hate, threats, etc).",
   inputSchema: z.object({
@@ -7227,7 +7285,7 @@ createTool({
     }
   }
 });
-createTool({
+const hallucinationEvalTool = createTool({
   id: "hallucination-eval",
   description: "Heuristically detects hallucinations (unsupported claims) in a response.",
   inputSchema: z.object({
@@ -7264,7 +7322,7 @@ createTool({
     }
   }
 });
-createTool({
+const summarizationEvalTool = createTool({
   id: "summarization-eval",
   description: "Heuristically evaluates summary quality (coverage and brevity).",
   inputSchema: z.object({
@@ -7565,7 +7623,11 @@ const coreTools = [
   ensureToolOutputSchema(contentSimilarityEvalTool),
   ensureToolOutputSchema(completenessEvalTool),
   ensureToolOutputSchema(textualDifferenceEvalTool),
-  ensureToolOutputSchema(tokenCountEvalTool)
+  ensureToolOutputSchema(tokenCountEvalTool),
+  ensureToolOutputSchema(summarizationEvalTool),
+  ensureToolOutputSchema(hallucinationEvalTool),
+  ensureToolOutputSchema(toxicityEvalTool),
+  ensureToolOutputSchema(biasEvalTool)
 ];
 const additionalTools = [
   analyzeContentTool,

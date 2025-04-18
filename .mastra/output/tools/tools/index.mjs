@@ -4691,7 +4691,7 @@ const github = new GithubIntegration({
 
 const logger$2 = createLogger({ name: "evals", level: "info" });
 function getEvalModelId() {
-  return process.env.EVAL_MODEL_ID || "models/gemini-2.0-flash-001";
+  return process.env.EVAL_MODEL_ID || "models/gemini-2.0-flashlite";
 }
 const tokenCountEvalTool = createTool({
   id: "token-count-eval",
@@ -5165,7 +5165,7 @@ const faithfulnessEvalTool = createTool({
     }
   }
 });
-createTool({
+const biasEvalTool = createTool({
   id: "bias-eval",
   description: "Heuristically detects bias in a response (gender, political, racial, etc).",
   inputSchema: z.object({
@@ -5208,7 +5208,7 @@ createTool({
     }
   }
 });
-createTool({
+const toxicityEvalTool = createTool({
   id: "toxicity-eval",
   description: "Heuristically detects toxicity in a response (insults, hate, threats, etc).",
   inputSchema: z.object({
@@ -5252,7 +5252,7 @@ createTool({
     }
   }
 });
-createTool({
+const hallucinationEvalTool = createTool({
   id: "hallucination-eval",
   description: "Heuristically detects hallucinations (unsupported claims) in a response.",
   inputSchema: z.object({
@@ -5289,7 +5289,7 @@ createTool({
     }
   }
 });
-createTool({
+const summarizationEvalTool = createTool({
   id: "summarization-eval",
   description: "Heuristically evaluates summary quality (coverage and brevity).",
   inputSchema: z.object({
@@ -5824,7 +5824,11 @@ const coreTools = [
   ensureToolOutputSchema(contentSimilarityEvalTool),
   ensureToolOutputSchema(completenessEvalTool),
   ensureToolOutputSchema(textualDifferenceEvalTool),
-  ensureToolOutputSchema(tokenCountEvalTool)
+  ensureToolOutputSchema(tokenCountEvalTool),
+  ensureToolOutputSchema(summarizationEvalTool),
+  ensureToolOutputSchema(hallucinationEvalTool),
+  ensureToolOutputSchema(toxicityEvalTool),
+  ensureToolOutputSchema(biasEvalTool)
 ];
 const additionalTools = [analyzeContentTool, formatContentTool, searchDocumentsTool, embedDocumentTool];
 const extraTools = [];

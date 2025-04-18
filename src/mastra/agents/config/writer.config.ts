@@ -162,12 +162,14 @@ export const writerAgentConfig: BaseAgentConfig = {
     When receiving a content creation request, mentally map audience characteristics and information needs before organizing content, ensuring your approach balances comprehensiveness with accessibility while maintaining engagement throughout.
   `,
   toolIds: [
-    "format-content",
-    "search-documents",
-    "read-file",
-    "write-file",
-    "collect-feedback",
-    "brave-search",
+  "read-file", // Corrected ID
+    "write-file", // Corrected ID
+    "tavily-search", // Specific search tool
+    "brave-search", // Specific search tool
+    "vector-query", // Specific vector tool
+    "google-vector-query", // Specific vector tool
+    "filtered-vector-query", // Specific vector tool
+    "search-documents", // Specific document tool
     "github_get_user_by_username",
     "github_search_repositories",
     "github_list_user_repos",
@@ -176,6 +178,11 @@ export const writerAgentConfig: BaseAgentConfig = {
     "read-knowledge-file",
     "write-knowledge-file",
     "arxiv_search",
+    "bias-eval",
+    "toxicity-eval",
+    "hallucination-eval",
+    "summarization-eval",
+    "token-count-eval",
   ],
 };
 

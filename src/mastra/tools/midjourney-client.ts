@@ -9,7 +9,7 @@ import {
 } from '@agentic/core'
 import defaultKy, { type KyInstance } from 'ky'
 import { z } from 'zod'
-
+import { createMastraTools } from "@agentic/mastra";
 // TODO: add additional methods for upscaling, variations, etc.
 
 export namespace midjourney {

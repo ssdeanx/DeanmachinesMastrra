@@ -133,6 +133,22 @@ export const researchAgentConfig: BaseAgentConfig = {
     "google-vector-query", // Specific vector tool
     "filtered-vector-query", // Specific vector tool
     "search-documents", // Specific document tool
+    "github_search_repositories",
+    "github_list_user_repos",
+    "github_get_repo",
+    "github_search_code",
+    "read-knowledge-file",
+    "write-knowledge-file",
+    "arxiv_search",
+    "bias-eval",
+    "toxicity-eval",
+    "hallucination-eval",
+    "summarization-eval",
+    "token-count-eval",
+    "create-graph-rag",
+    "graph-rag-query",
+    "execute_python",
+    "wikipedia_get_page_summary",
   ],
 };
 

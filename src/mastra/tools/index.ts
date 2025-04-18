@@ -77,6 +77,10 @@ import {
   completenessEvalTool,
   textualDifferenceEvalTool,
   tokenCountEvalTool,
+  summarizationEvalTool,
+  hallucinationEvalTool,
+  toxicityEvalTool,
+  biasEvalTool
 } from "./evals";
 import { tracingTools } from "./tracingTools";
 
@@ -320,6 +324,10 @@ const coreTools: Tool<any, any>[] = [
   ensureToolOutputSchema(completenessEvalTool),
   ensureToolOutputSchema(textualDifferenceEvalTool),
   ensureToolOutputSchema(tokenCountEvalTool),
+  ensureToolOutputSchema(summarizationEvalTool),
+  ensureToolOutputSchema(hallucinationEvalTool),
+  ensureToolOutputSchema(toxicityEvalTool),
+  ensureToolOutputSchema(biasEvalTool),
 ];
 
 // === Additional Tools from contentTools and document-tools ===

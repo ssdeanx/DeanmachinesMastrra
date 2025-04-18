@@ -129,11 +129,32 @@ export const analystAgentConfig: BaseAgentConfig = {
     When you receive a request for analysis, mentally walkthrough this process before responding, ensuring your analytical approach is systematic, comprehensive, and insightful.
   `,
   toolIds: [
-    "read-file",
-    "vector-query",
-    "google-vector-query",
-    "filtered-vector-query", // Corrected ID
-    "analyze-content", // Added based on role
+    "read-file", // Corrected ID
+    "write-file", // Corrected ID
+    "tavily-search", // Specific search tool
+    "brave-search", // Specific search tool
+    "vector-query", // Specific vector tool
+    "google-vector-query", // Specific vector tool
+    "filtered-vector-query", // Specific vector tool
+    "search-documents", // Specific document tool
+    "github_search_repositories",
+    "github_list_user_repos",
+    "github_get_repo",
+    "github_search_code",
+    "read-knowledge-file",
+    "write-knowledge-file",
+    "arxiv_search",
+    "bias-eval",
+    "toxicity-eval",
+    "hallucination-eval",
+    "summarization-eval",
+    "token-count-eval",
+    "create-graph-rag",
+    "graph-rag-query",
+    "execute_python",
+    "wikipedia_get_page_summary",
+    "context-precision-eval",
+    "embed-document",
   ],
 };
 
