@@ -168,6 +168,14 @@ export const writerAgentConfig: BaseAgentConfig = {
     "write-file",
     "collect-feedback",
     "brave-search",
+    "github_get_user_by_username",
+    "github_search_repositories",
+    "github_list_user_repos",
+    "github_get_repo",
+    "github_search_code",
+    "read-knowledge-file",
+    "write-knowledge-file",
+    "arxiv_search",
   ],
 };
 

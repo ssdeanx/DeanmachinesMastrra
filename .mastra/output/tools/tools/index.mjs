@@ -5809,7 +5809,6 @@ const coreTools = [
   jsonReaderTool,
   extractHtmlTextTool,
   //fetchAndExtractDocumentTool,
-  memoryQueryTool,
   collectFeedbackTool,
   analyzeFeedbackTool,
   applyRLInsightsTool,

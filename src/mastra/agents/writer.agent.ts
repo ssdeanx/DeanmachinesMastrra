@@ -10,7 +10,7 @@ import { writerAgentConfig as writerConfig } from "./config";
 import { sharedMemory } from "../database";
 import { createLogger } from "@mastra/core/logger";
 
-const logger = createLogger({ name: "writer-agent", level: "info" });
+const logger = createLogger({ name: "writer-agent", level: "debug" });
 
 /**
  * Writer Agent with content formatting capabilities

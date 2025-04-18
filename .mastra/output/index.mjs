@@ -2168,7 +2168,15 @@ const writerAgentConfig = {
     "read-file",
     "write-file",
     "collect-feedback",
-    "brave-search"
+    "brave-search",
+    "github_get_user_by_username",
+    "github_search_repositories",
+    "github_list_user_repos",
+    "github_get_repo",
+    "github_search_code",
+    "read-knowledge-file",
+    "write-knowledge-file",
+    "arxiv_search"
   ]
 };
 z.object({
@@ -2213,7 +2221,7 @@ z.object({
   ).optional().describe("Recommendations for further improvements")
 });
 
-const logger$t = createLogger({ name: "langfuse-service", level: "info" });
+const logger$s = createLogger({ name: "langfuse-service", level: "info" });
 const envSchema$2 = z.object({
   LANGFUSE_PUBLIC_KEY: z.string().min(1, "Langfuse public key is required"),
   LANGFUSE_SECRET_KEY: z.string().min(1, "Langfuse secret key is required"),
@@ -2226,12 +2234,12 @@ function validateEnv() {
     if (error instanceof z.ZodError) {
       const missingKeys = error.errors.filter((e) => e.code === "invalid_type" && e.received === "undefined").map((e) => e.path.join("."));
       if (missingKeys.length > 0) {
-        logger$t.error(
+        logger$s.error(
           `Missing required environment variables: ${missingKeys.join(", ")}`
         );
       }
     }
-    logger$t.error("Langfuse environment validation failed:", { error });
+    logger$s.error("Langfuse environment validation failed:", { error });
     throw new Error(
       `Langfuse service configuration error: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -2246,7 +2254,7 @@ function createLangfuseClient() {
       baseUrl: validatedEnv$1.LANGFUSE_HOST
     });
   } catch (error) {
-    logger$t.error("Failed to create Langfuse client:", { error });
+    logger$s.error("Failed to create Langfuse client:", { error });
     throw new Error(
       `Langfuse client creation failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -2267,10 +2275,10 @@ class LangfuseService {
    */
   createTrace(name, options) {
     try {
-      logger$t.debug("Creating Langfuse trace", { name, ...options });
+      logger$s.debug("Creating Langfuse trace", { name, ...options });
       return this.client.trace({ name, ...options });
     } catch (error) {
-      logger$t.error("Error creating trace:", { error, name });
+      logger$s.error("Error creating trace:", { error, name });
       throw new Error(`Failed to create Langfuse trace: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2283,10 +2291,10 @@ class LangfuseService {
    */
   createSpan(name, options) {
     try {
-      logger$t.debug("Creating Langfuse span", { name, ...options });
+      logger$s.debug("Creating Langfuse span", { name, ...options });
       return this.client.span({ name, ...options });
     } catch (error) {
-      logger$t.error("Error creating span:", { error, name });
+      logger$s.error("Error creating span:", { error, name });
       throw new Error(`Failed to create Langfuse span: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2299,10 +2307,10 @@ class LangfuseService {
    */
   logGeneration(name, options) {
     try {
-      logger$t.debug("Logging Langfuse generation", { name, ...options });
+      logger$s.debug("Logging Langfuse generation", { name, ...options });
       return this.client.generation({ name, ...options });
     } catch (error) {
-      logger$t.error("Error logging generation:", { error, name });
+      logger$s.error("Error logging generation:", { error, name });
       throw new Error(`Failed to log Langfuse generation: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2315,13 +2323,13 @@ class LangfuseService {
    */
   createScore(options) {
     try {
-      logger$t.debug("Creating Langfuse score", options);
+      logger$s.debug("Creating Langfuse score", options);
       if (!options.traceId && !options.spanId && !options.generationId) {
         throw new Error("At least one of traceId, spanId, or generationId must be provided");
       }
       return this.client.score(options);
     } catch (error) {
-      logger$t.error("Error creating score:", { error, name: options.name });
+      logger$s.error("Error creating score:", { error, name: options.name });
       throw new Error(`Failed to create Langfuse score: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2333,16 +2341,16 @@ class LangfuseService {
   async flush() {
     try {
       await this.client.flush();
-      logger$t.debug("Flushed Langfuse events");
+      logger$s.debug("Flushed Langfuse events");
     } catch (error) {
-      logger$t.error("Error flushing Langfuse events:", { error });
+      logger$s.error("Error flushing Langfuse events:", { error });
       throw new Error(`Failed to flush Langfuse events: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
 const langfuse = new LangfuseService();
 
-const logger$s = createLogger({ name: "mastra-hooks", level: "debug" });
+const logger$r = createLogger({ name: "mastra-hooks", level: "debug" });
 function createResponseHook(config = {}) {
   const {
     minResponseLength = 10,
@@ -2357,7 +2365,7 @@ function createResponseHook(config = {}) {
       const currentSpan = trace.getSpan(currentContext);
       const traceId = currentSpan?.spanContext().traceId;
       const spanId = currentSpan?.spanContext().spanId;
-      logger$s.debug(`Response hook executing (attempt ${attempt}/${maxAttempts})`, {
+      logger$r.debug(`Response hook executing (attempt ${attempt}/${maxAttempts})`, {
         traceId,
         spanId,
         hasText: !!response.text,
@@ -2372,7 +2380,7 @@ function createResponseHook(config = {}) {
             comment: `Response validation attempt ${attempt}/${maxAttempts}`
           });
         } catch (err) {
-          logger$s.warn("Failed to record validation in Langfuse", { error: err });
+          logger$r.warn("Failed to record validation in Langfuse", { error: err });
         }
       }
       if (validateResponse(response)) {
@@ -2390,10 +2398,10 @@ function createResponseHook(config = {}) {
             hookSpan.setAttribute("response.attempt", attempt);
             hookSpan.end();
           }
-          logger$s.info(`Empty response, retrying (${attempt}/${maxAttempts})`);
+          logger$r.info(`Empty response, retrying (${attempt}/${maxAttempts})`);
           return onResponse(response, attempt + 1);
         }
-        logger$s.warn(`Maximum retry attempts reached (${maxAttempts})`);
+        logger$r.warn(`Maximum retry attempts reached (${maxAttempts})`);
         if (hookSpan) {
           hookSpan.setStatus({
             code: SpanStatusCode$1.ERROR,
@@ -2407,7 +2415,7 @@ function createResponseHook(config = {}) {
         };
       }
       if (response.text && response.text.length < minResponseLength) {
-        logger$s.debug(`Response too short (${response.text.length} < ${minResponseLength}), adding suggestion for elaboration`);
+        logger$r.debug(`Response too short (${response.text.length} < ${minResponseLength}), adding suggestion for elaboration`);
         if (hookSpan) {
           hookSpan.setAttribute("response.tooShort", true);
           hookSpan.setAttribute("response.length", response.text.length);
@@ -2424,7 +2432,7 @@ function createResponseHook(config = {}) {
       }
       return response;
     } catch (error) {
-      logger$s.error("Response hook error:", { error });
+      logger$r.error("Response hook error:", { error });
       if (hookSpan) {
         hookSpan.setStatus({
           code: SpanStatusCode$1.ERROR,
@@ -2501,7 +2509,7 @@ function createEmbeddings(apiKey, modelName) {
   });
 }
 
-const logger$r = createLogger({ name: "vector-query-tool", level: "info" });
+const logger$q = createLogger({ name: "vector-query-tool", level: "info" });
 const envSchema$1 = z.object({
   GOOGLE_AI_API_KEY: z.string().min(1, "Google AI API key is required"),
   PINECONE_INDEX: z.string().default("Default"),
@@ -2512,7 +2520,7 @@ const validatedEnv = (() => {
   try {
     return envSchema$1.parse(env);
   } catch (error) {
-    logger$r.error("Environment validation failed:", { error });
+    logger$q.error("Environment validation failed:", { error });
     throw new Error(
       `Vector query tool configuration error: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -2527,12 +2535,12 @@ function createMastraVectorQueryTool(config = {}) {
     const dimensions = config.dimensions || validatedEnv.PINECONE_DIMENSION;
     const apiKey = config.apiKey || validatedEnv.GOOGLE_AI_API_KEY;
     const topK = config.topK || 5;
-    logger$r.info(
+    logger$q.info(
       `Creating vector query tool for ${vectorStoreName}:${indexName}`
     );
     let embeddingModel;
     if (embeddingProvider === "tiktoken") {
-      logger$r.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
+      logger$q.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
       const tiktokenAdapter = {
         specificationVersion: "v1",
         provider: "tiktoken",
@@ -2556,7 +2564,7 @@ function createMastraVectorQueryTool(config = {}) {
             }
             return { embeddings: [{ embedding }] };
           } catch (error) {
-            logger$r.error("Tiktoken embedding error:", { error });
+            logger$q.error("Tiktoken embedding error:", { error });
             throw new Error(
               `Tiktoken embedding failed: ${error instanceof Error ? error.message : String(error)}`
             );
@@ -2586,7 +2594,7 @@ function createMastraVectorQueryTool(config = {}) {
       };
       embeddingModel = tiktokenAdapter;
     } else {
-      logger$r.info("Using Google embeddings");
+      logger$q.info("Using Google embeddings");
       embeddingModel = createEmbeddings(
         apiKey,
         "models/gemini-embedding-exp-03-07"
@@ -2614,10 +2622,10 @@ function createMastraVectorQueryTool(config = {}) {
       description,
       enableFilter: config.enableFilters
     });
-    logger$r.info(`Vector query tool created: ${toolId}`);
+    logger$q.info(`Vector query tool created: ${toolId}`);
     return tool;
   } catch (error) {
-    logger$r.error("Failed to create vector query tool:", { error });
+    logger$q.error("Failed to create vector query tool:", { error });
     throw new Error(
       `Vector query tool creation failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -3718,12 +3726,12 @@ const OTelAttributeNames = {
   TOTAL_TOKENS: "ai.tokens.total",
   LATENCY_MS: "ai.latency.ms"};
 
-const logger$q = createLogger({ name: "signoz-service", level: "info" });
+const logger$p = createLogger({ name: "signoz-service", level: "info" });
 let tracerProvider = null;
 let tracer = null;
 function initSigNoz(config) {
   if (config.enabled === false) {
-    logger$q.info("SigNoz tracing is disabled");
+    logger$p.info("SigNoz tracing is disabled");
     return null;
   }
   if (tracer) {
@@ -3733,7 +3741,7 @@ function initSigNoz(config) {
     const serviceName = config.serviceName || "deanmachines-ai";
     const endpoint = config.export?.endpoint || env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces";
     const headers = config.export?.headers || {};
-    logger$q.info(`Initializing SigNoz tracing for service: ${serviceName}`, { endpoint });
+    logger$p.info(`Initializing SigNoz tracing for service: ${serviceName}`, { endpoint });
     const resource = resourceFromAttributes({
       [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
       [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: env.NODE_ENV || "development"
@@ -3746,7 +3754,7 @@ function initSigNoz(config) {
     processors.push(new BatchSpanProcessor(otlpExporter));
     if (env.NODE_ENV !== "production") {
       processors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
-      logger$q.debug("Added console span exporter for debugging");
+      logger$p.debug("Added console span exporter for debugging");
     }
     tracerProvider = new NodeTracerProvider({
       resource,
@@ -3754,10 +3762,10 @@ function initSigNoz(config) {
     });
     tracerProvider.register();
     tracer = api.trace.getTracer("deanmachines-tracer");
-    logger$q.info("SigNoz tracing initialized successfully");
+    logger$p.info("SigNoz tracing initialized successfully");
     return tracer;
   } catch (error) {
-    logger$q.error("Failed to initialize SigNoz tracing", {
+    logger$p.error("Failed to initialize SigNoz tracing", {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : void 0
     });
@@ -3772,7 +3780,7 @@ function getTracer() {
 }
 function createAISpan(name, attributes = {}) {
   if (!tracer) {
-    logger$q.warn("Creating span without initialized SigNoz tracing");
+    logger$p.warn("Creating span without initialized SigNoz tracing");
     return api.trace.getTracer("no-op").startSpan(name);
   }
   return tracer.startSpan(name, {
@@ -3819,11 +3827,11 @@ function recordMetrics(span, metrics) {
 async function shutdownSigNoz() {
   if (tracerProvider) {
     try {
-      logger$q.info("Shutting down SigNoz tracing");
+      logger$p.info("Shutting down SigNoz tracing");
       await tracerProvider.shutdown();
-      logger$q.info("SigNoz tracing shutdown complete");
+      logger$p.info("SigNoz tracing shutdown complete");
     } catch (error) {
-      logger$q.error("Error shutting down SigNoz tracing", { error });
+      logger$p.error("Error shutting down SigNoz tracing", { error });
     }
   }
 }
@@ -3863,7 +3871,7 @@ var signoz = {
   shutdown: shutdownSigNoz
 };
 
-const logger$p = createLogger({ name: "thread-manager", level: "info" });
+const logger$o = createLogger({ name: "thread-manager", level: "info" });
 class ThreadManager {
   threads = /* @__PURE__ */ new Map();
   resourceThreads = /* @__PURE__ */ new Map();
@@ -3877,7 +3885,7 @@ class ThreadManager {
    */
   async createThread(options) {
     const span = createAISpan("thread.create", { resourceId: options.resourceId });
-    logger$p.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
+    logger$o.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
     const startTime = Date.now();
     let runId;
     try {
@@ -3893,7 +3901,7 @@ class ThreadManager {
         this.resourceThreads.set(options.resourceId, /* @__PURE__ */ new Set());
       }
       this.resourceThreads.get(options.resourceId)?.add(threadId);
-      logger$p.info("Thread created", { threadId, resourceId: options.resourceId });
+      logger$o.info("Thread created", { threadId, resourceId: options.resourceId });
       span.setStatus({ code: 1 });
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "success" });
       runId = await createLangSmithRun("thread.create", [options.resourceId]);
@@ -3902,7 +3910,7 @@ class ThreadManager {
     } catch (error) {
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "error", errorMessage: String(error) });
       if (runId) await trackFeedback(runId, { score: 0, comment: "Thread creation failed", value: error });
-      logger$p.error("Failed to create thread", { error });
+      logger$o.error("Failed to create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -3919,11 +3927,11 @@ class ThreadManager {
     const span = createAISpan("thread.get", { threadId });
     try {
       const thread = this.threads.get(threadId);
-      logger$p.info("Get thread", { threadId, found: !!thread });
+      logger$o.info("Get thread", { threadId, found: !!thread });
       span.setStatus({ code: 1 });
       return thread;
     } catch (error) {
-      logger$p.error("Failed to get thread", { error });
+      logger$o.error("Failed to get thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -3941,11 +3949,11 @@ class ThreadManager {
     try {
       const threadIds = this.resourceThreads.get(resourceId) || /* @__PURE__ */ new Set();
       const threads = Array.from(threadIds).map((id) => this.threads.get(id)).filter((thread) => thread !== void 0);
-      logger$p.info("Get threads by resource", { resourceId, count: threads.length });
+      logger$o.info("Get threads by resource", { resourceId, count: threads.length });
       span.setStatus({ code: 1 });
       return threads;
     } catch (error) {
-      logger$p.error("Failed to get threads by resource", { error });
+      logger$o.error("Failed to get threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -3963,16 +3971,16 @@ class ThreadManager {
     try {
       const threads = this.getThreadsByResource(resourceId);
       if (threads.length === 0) {
-        logger$p.info("No threads found for resource", { resourceId });
+        logger$o.info("No threads found for resource", { resourceId });
         span.setStatus({ code: 1 });
         return void 0;
       }
       const mostRecent = threads.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-      logger$p.info("Most recent thread", { resourceId, threadId: mostRecent.id });
+      logger$o.info("Most recent thread", { resourceId, threadId: mostRecent.id });
       span.setStatus({ code: 1 });
       return mostRecent;
     } catch (error) {
-      logger$p.error("Failed to get most recent thread", { error });
+      logger$o.error("Failed to get most recent thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -3991,16 +3999,16 @@ class ThreadManager {
     try {
       const existingThread = this.getMostRecentThread(resourceId);
       if (existingThread) {
-        logger$p.info("Found existing thread", { resourceId, threadId: existingThread.id });
+        logger$o.info("Found existing thread", { resourceId, threadId: existingThread.id });
         span.setStatus({ code: 1 });
         return existingThread;
       }
-      logger$p.info("No existing thread, creating new", { resourceId });
+      logger$o.info("No existing thread, creating new", { resourceId });
       const newThread = await this.createThread({ resourceId, metadata });
       span.setStatus({ code: 1 });
       return newThread;
     } catch (error) {
-      logger$p.error("Failed to get or create thread", { error });
+      logger$o.error("Failed to get or create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -4019,11 +4027,11 @@ class ThreadManager {
       const thread = this.threads.get(threadId);
       if (thread) {
         thread.lastReadAt = date;
-        logger$p.info("Marked thread as read", { threadId, date });
+        logger$o.info("Marked thread as read", { threadId, date });
       }
       span.setStatus({ code: 1 });
     } catch (error) {
-      logger$p.error("Failed to mark thread as read", { error });
+      logger$o.error("Failed to mark thread as read", { error });
       span.setStatus({ code: 2, message: String(error) });
     } finally {
       span.end();
@@ -4042,11 +4050,11 @@ class ThreadManager {
         const lastRead = this.threadReadStatus.get(thread.id);
         return !lastRead || thread.createdAt > lastRead;
       });
-      logger$p.info("Get unread threads by resource", { resourceId, count: unread.length });
+      logger$o.info("Get unread threads by resource", { resourceId, count: unread.length });
       span.setStatus({ code: 1 });
       return unread;
     } catch (error) {
-      logger$p.error("Failed to get unread threads by resource", { error });
+      logger$o.error("Failed to get unread threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -4897,81 +4905,6 @@ function generateSampleRewardRecords(agentId, episodeCount, actionsPerEpisode) {
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   );
 }
-
-const logger$o = createLogger({ name: "memory-query-tool" });
-const includeMessageSchema = z.object({
-  id: z.string().describe("ID of the message to include."),
-  withPreviousMessages: z.number().int().nonnegative().optional().describe("Number of messages to include before this message."),
-  withNextMessages: z.number().int().nonnegative().optional().describe("Number of messages to include after this message.")
-});
-const memorySelectBySchema = z.object({
-  vectorSearchString: z.string().optional().describe("Search string for finding semantically similar messages."),
-  last: z.union([z.number().int().positive(), z.literal(false)]).optional().describe(
-    "Number of most recent messages to retrieve (or false to disable limit). Defaults influenced by memory config."
-  ),
-  include: z.array(includeMessageSchema).optional().describe(
-    "Array of specific message IDs to include, potentially with context."
-  )
-}).describe(
-  "Options for selecting which messages to retrieve from the thread."
-);
-const memoryQueryInputSchema = z.object({
-  threadId: z.string().describe("The unique identifier of the thread to retrieve messages from."),
-  selectBy: memorySelectBySchema.describe(
-    "Criteria for selecting messages (e.g., last N, semantic search, specific IDs)."
-  )
-  // resourceId: z.string().optional().describe("Optional ID of the resource owning the thread for validation."),
-  // threadConfig: z.any().optional().describe("Optional memory configuration overrides for this query."), // Type depends on MemoryConfig definition
-});
-const memoryQueryOutputSchema = z.object({
-  // Using z.unknown() for messages as CoreMessage structure might be complex or not fully defined here
-  messages: z.array(z.unknown()).describe("An array of message objects matching the query criteria.")
-  // uiMessages: z.array(z.unknown()).optional().describe("Optional array of messages formatted for UI display."), // Include if needed
-});
-const memoryQueryTool = createTool({
-  id: "memory-query",
-  // Unique ID for the tool
-  description: "Queries messages within a specific thread stored in the agent memory system based on criteria like recency, semantic similarity, or specific IDs.",
-  inputSchema: memoryQueryInputSchema,
-  outputSchema: memoryQueryOutputSchema,
-  execute: async ({ context }) => {
-    const { threadId, selectBy } = context;
-    logger$o.info(`Executing memory query for threadId: ${threadId}`, {
-      selectBy
-    });
-    if (!sharedMemory || typeof sharedMemory.query !== "function") {
-      logger$o.error(
-        "Memory system (sharedMemory) or its query method is not available."
-      );
-      throw new Error("Memory system or query method is not available.");
-    }
-    try {
-      const {
-        messages
-        /*, uiMessages */
-      } = await sharedMemory.query({
-        threadId,
-        selectBy
-        // resourceId, // Pass if needed/available
-        // threadConfig, // Pass if needed/available
-      });
-      const finalMessages = Array.isArray(messages) ? messages : [];
-      logger$o.info(
-        `Memory query successful for thread ${threadId}, returned ${finalMessages.length} messages.`
-      );
-      return { messages: finalMessages };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger$o.error(
-        `Memory query failed for thread ${threadId}: ${errorMessage}`,
-        { error }
-      );
-      throw new Error(
-        `Failed to query memory for thread ${threadId}: ${errorMessage}`
-      );
-    }
-  }
-});
 
 const analyzeContentTool = createTool({
   id: "analyze-content",
@@ -7617,7 +7550,6 @@ const coreTools = [
   jsonReaderTool,
   extractHtmlTextTool,
   //fetchAndExtractDocumentTool,
-  memoryQueryTool,
   collectFeedbackTool,
   analyzeFeedbackTool,
   applyRLInsightsTool,
@@ -7840,7 +7772,7 @@ const analystAgent = createAgentFromConfig({
   }
 });
 
-const logger$f = createLogger({ name: "writer-agent", level: "info" });
+const logger$f = createLogger({ name: "writer-agent", level: "debug" });
 const writerAgent = createAgentFromConfig({
   config: writerAgentConfig,
   memory: sharedMemory,

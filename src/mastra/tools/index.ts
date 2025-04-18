@@ -304,7 +304,6 @@ const coreTools: Tool<any, any>[] = [
   jsonReaderTool,
   extractHtmlTextTool, 
   //fetchAndExtractDocumentTool,
-  memoryQueryTool,
   collectFeedbackTool,
   analyzeFeedbackTool,
   applyRLInsightsTool,
