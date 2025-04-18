@@ -11,3 +11,4 @@ node_modules/
 gcp-vertexai-credentials.json
 .env
 .env.development
+.mastra
