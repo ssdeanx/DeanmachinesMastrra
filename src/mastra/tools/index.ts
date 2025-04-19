@@ -61,6 +61,7 @@ import { createMastraAISDKTools } from "./ai-sdk"; // Import Mastra helper
 import { createMastraE2BTools } from "./e2b"; // Import Mastra helper
 import { createGraphRagTool, graphRagQueryTool } from "./graphRag"; // These are Mastra core tools
 import { createMastraGitHubTools } from "./github"; // Import Mastra helper
+import { createMastraMcpTools } from "./mcptool";
 import { github } from "../integrations"; // Used for custom getMainBranchRef
 import ExaSearchOutputSchema from "./exasearch";
 import { GitHubUserSchema } from "./github"; // Assuming this is the correct export for GitHub user schema
@@ -113,6 +114,7 @@ export * from "../services/signoz";
 export * from "../services/tracing";
 export * from "./polygon";
 export * from "./reddit";
+export * from "./mcptool";
 
 // === Configure Logger ===
 const logger = createLogger({ name: "tool-initialization", level: "info" });
@@ -380,20 +382,17 @@ try {
     logger.error("Failed to initialize LlamaIndex tools:", { error });
 }
 
-// --- MCP Tools (Intentionally Commented Out) ---
-// import { createMcpTools } from "@agentic/mcp"; // Assuming this path is correct if uncommented
-// (async () => {
-//   try {
-//     const mcpTools = await createMcpTools({ /* config */ });
-//     // Need a createMastraMcpTools helper or use createMastraTools directly if uncommented
-//     // const mcpMastraTools = createMastraTools(mcpTools);
-//     // const mcpToolsArray = Object.values(mcpMastraTools).map(ensureToolOutputSchema);
-//     // extraTools.push(...mcpToolsArray);
-//     // logger.info(`Added ${mcpToolsArray.length} MCP tools`);
-//   } catch (error) {
-//     logger.error("Failed to initialize MCP tools:", { error });
-//   }
-// })();
+// --- MCP Tools (using Mastra helper, async initialization) ---
+try {
+    // Note: If this file is not top-level async, you must move this to an async setup/init function!
+    // For top-level await (ESM), this works as-is.
+    const mcpToolsObject = await createMastraMcpTools();
+    const mcpToolsArray = Object.values(mcpToolsObject);
+    extraTools.push(...mcpToolsArray.map(tool => tool as Tool<any, any>));
+    logger.info(`Added ${mcpToolsArray.length} MCP tools.`);
+} catch (error) {
+    logger.error("Failed to initialize MCP tools:", { error });
+}
 
 // --- Arxiv Tools (using Mastra helper) ---
 try {

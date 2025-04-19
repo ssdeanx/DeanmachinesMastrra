@@ -68,6 +68,7 @@
     "@mastra/deployer": "^0.2.9",
     "@mastra/github": "^1.1.18",
     "@mastra/loggers": "^0.1.18",
+    "@mastra/mcp": "^0.3.10",
     "@mastra/memory": "^0.2.10",
     "@mastra/pg": "^0.2.10",
     "@mastra/pinecone": "^0.2.8",

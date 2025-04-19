@@ -147,7 +147,6 @@ export const researchAgentConfig: BaseAgentConfig = {
     "token-count-eval",
     "create-graph-rag",
     "graph-rag-query",
-    "execute_python",
     "wikipedia_get_page_summary",
   ],
 };

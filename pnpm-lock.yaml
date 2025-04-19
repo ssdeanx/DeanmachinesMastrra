@@ -179,6 +179,9 @@ importers:
       '@mastra/loggers':
         specifier: ^0.1.18
         version: 0.1.18(encoding@0.1.13)(openapi-types@12.1.3)(react@19.1.0)
+      '@mastra/mcp':
+        specifier: ^0.3.10
+        version: 0.3.10(encoding@0.1.13)(openapi-types@12.1.3)(react@19.1.0)
       '@mastra/memory':
         specifier: ^0.2.10
         version: 0.2.10(encoding@0.1.13)(openapi-types@12.1.3)(react@19.1.0)
@@ -2747,6 +2750,9 @@ packages:
 
   '@mastra/loggers@0.1.18':
     resolution: {integrity: sha512-kcKAcX5kkwqNjh6+dItJfTABCg5b+XquFG8e7ueaLGVF1DNRRDhyYXKvOjOXzERZxwaLNisxh28bhmhizZzOyw==}
+
+  '@mastra/mcp@0.3.10':
+    resolution: {integrity: sha512-j6iBr7r7HWBmov4mwRwJXg1IpB0vf0YJAStMVRh86XYm/A3gOwiim3Q8HnpLMk3MzaoNg07VFYjjFdQvYboxlQ==}
 
   '@mastra/memory@0.2.10':
     resolution: {integrity: sha512-YyMDpDhIYJk/oSnvdqJ8P60oeaWXXgvVhP7DzXe1tl9gpmhazTukmAiLvwled8RBNW31a0ScZ9HUGOHMiTprrg==}
@@ -13871,6 +13877,33 @@ snapshots:
   '@mastra/loggers@0.1.18(encoding@0.1.13)(openapi-types@12.1.3)(react@19.1.0)':
     dependencies:
       '@mastra/core': 0.8.3(encoding@0.1.13)(openapi-types@12.1.3)(react@19.1.0)
+    transitivePeerDependencies:
+      - '@hono/arktype-validator'
+      - '@hono/effect-validator'
+      - '@hono/typebox-validator'
+      - '@hono/valibot-validator'
+      - '@hono/zod-validator'
+      - '@sinclair/typebox'
+      - '@valibot/to-json-schema'
+      - arktype
+      - aws-crt
+      - bufferutil
+      - effect
+      - encoding
+      - openapi-types
+      - react
+      - supports-color
+      - utf-8-validate
+      - valibot
+      - zod-openapi
+
+  '@mastra/mcp@0.3.10(encoding@0.1.13)(openapi-types@12.1.3)(react@19.1.0)':
+    dependencies:
+      '@mastra/core': 0.8.3(encoding@0.1.13)(openapi-types@12.1.3)(react@19.1.0)
+      '@modelcontextprotocol/sdk': 1.10.1
+      date-fns: 4.1.0
+      exit-hook: 4.0.0
+      uuid: 11.1.0
     transitivePeerDependencies:
       - '@hono/arktype-validator'
       - '@hono/effect-validator'

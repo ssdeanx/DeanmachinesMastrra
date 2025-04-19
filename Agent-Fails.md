@@ -11,41 +11,20 @@
 
 ## testing
 
-- "calculate-reward", // RL tool, not sure if it works but alot unread items in rlReward
-- "define-reward-function", // RL tool, not sure if it works but alot unread items in rlReward
-- "optimize-policy", // RL tool, not sure if it works but alot unread items in rlReward
-- 'midjourney_create_images', // needs output schema patched
-- "ai-sdk-prompt" // not tested yet, but seems to be a wrapper for the other tools
-- "llm-chain", // not tested yet
-- "create-graph-rag",
-- "graph-rag-query",
-- "wikipedia_search",
-- "wikipedia_get_page_summary",
-- "vector-query", // tiktoken vectorizer hasnt been tested yet
-- "google-vector-query", // google vectorizer hasnt been tested yet
-- "filtered-vector-query", // tiktoken vectorizer with metadata filter hasnt been tested yet
-- "google-search", // google search tool hasnt been tested yet but probably needs checked its @agentic
-- 'google_drive_list_files', // needs checked if output schema patched
-- 'google_drive_get_file', // needs checked if output schema patched
-- 'google_drive_export_file', // needs checked if output schema patched
-- 'google_drive_create_folder', // needs checked if output schema patched
-- 'google_docs_get_document', // needs checked if output schema patched
-- "execute_python", // might work, pretty sure it does but not tested yet, could use typescript tool as well
+"tickerDetails"
+"tickerNews"
+"tickerAggregates"
+"tickerPreviousClose"
+"cryptoAggregates"
+"cryptoPrice",
+"cryptoTickers",
+"reddit_searchPosts"
+"reddit_getPost"
+"reddit_listSubredditPosts"
+"reddit_getSubreddit"
 
 
-"token-count-eval",
-"completeness-eval",
-"content-similarity-eval",
-"answer-relevancy-eval",
-"context-precision-eval",
-"context-position-eval"
-"tone-consistency-eval",
-"keyword-coverage-eval",
-"textual-difference-eval",
-"faithfulness-eval",
-"bias-eval",
-"toxicity-eval",
-"hallucination-eval",
+
 "summarization-eval",
 
 
@@ -84,6 +63,20 @@
     "filtered-vector-query",
     "tavily-search",
     
+"token-count-eval",
+"completeness-eval",
+"content-similarity-eval",
+"answer-relevancy-eval",
+"context-precision-eval",
+"context-position-eval"
+"tone-consistency-eval",
+"keyword-coverage-eval",
+"textual-difference-eval",
+"faithfulness-eval",
+"bias-eval",
+"toxicity-eval",
+"hallucination-eval",
+
 ## 100% working
 
     ```ts

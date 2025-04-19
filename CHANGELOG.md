@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.0.13] - 2025-04-19
+
+### Added
+
+- **mcptool.ts**
+  - Added `createMastraMcpTools` helper for robust async MCP tool loading, supporting multiple MCP servers (`mastra`, `sequentialthinking`, and a custom `socat` TCP relay).
+  - Ensured only Mastra-native helpers and types are used (no `@agentic/mastra`).
+  - Ready for direct use in agent and tool registry initialization.
+
+- **index.ts (tool barrel)**
+  - Integrated async MCP tool initialization using `createMastraMcpTools` in the extra tools section.
+  - MCP tools are now loaded and available to agents via `allTools`, `allToolsMap`, and `toolGroups`.
+  - Added `export * from "./mcptool";` for unified exports.
+  - Provided clear comments and error handling for async tool loading.
+
+### Changed
+
+- **Polygon Tools**
+  - Cleaned up and finalized Polygon tool schemas and registration.
+  - Ensured all Polygon endpoints and schemas are patched and exported for agent use.
+
+- **General**
+  - Improved documentation and inline comments for MCP and Polygon tool integration.
+  - Clarified async initialization pattern for tool registry to support MCP and other async tools.
+
+### Fixed
+
+- Removed all references to `@agentic/mastra` in MCP tool loading to prevent cross-package errors.
+- Ensured MCP tools are loaded asynchronously and safely, with robust error logging.
+- Confirmed all tools (including MCP, Polygon, Reddit, etc.) are discoverable and usable by agents.
+
+### Notes
+
+- MCP tools now follow the Mastra pattern: async loading, explicit Zod schemas, and unified exports.
+- All changes linted and type-checked after edits.
+- Next steps: Continue to document new tool patterns and agent integration in this changelog for future maintainers.
+
+---
+
+## [v0.0.12] - 2025-04-19
+
+### Added
+
+- **arxiv.ts**
+  - Implemented `arxiv_download_pdf` tool: Downloads a PDF for a given arXiv ID and saves it to disk using `fs-extra` and `ky`. Ensures directory creation and robust file writing.
+  - All arXiv tools now have explicit Zod output schemas (`ArxivSearchOutputSchema`, `ArxivPdfUrlOutputSchema`, `ArxivDownloadPdfOutputSchema`).
+  - Patched all arXiv tool output schemas in `createMastraArxivTools` for Mastra compatibility.
+  - Improved `extractId` utility for robust arXiv ID parsing.
+  - Cleaned up namespace and type exports for clarity.
+
+- **polygon.ts**
+  - Productionized MastraPolygonClient: Now requires and validates `POLYGON_API_KEY` from environment or config.
+  - Added robust error handling for API failures.
+  - Explicitly patched `tickerDetails` output schema for Mastra compatibility.
+  - Exported `TickerDetailsSchema` for downstream use and type safety.
+
+- **reddit.ts**
+  - Expanded `SubredditPostSchema` to include all relevant Reddit post fields.
+  - Added error handling to Reddit tool methods.
+  - Patched `getSubredditPosts` output schema for Mastra compatibility.
+  - Exported `SubredditPostSchema` for downstream use and type safety.
+
+- **index.ts (tool barrel)**
+  - Ensured all tools (`arxiv`, `polygon`, `reddit`, etc.) are exported using `export * from ...` for unified tool registration.
+  - Added `POLYGON_API_KEY` to `envSchema` for environment validation.
+  - Exported all relevant schemas (`TickerDetailsSchema`, `SubredditPostSchema`, etc.) for agent and workflow configs.
+  - Confirmed all tools are discoverable via `allTools`, `allToolsMap`, and `toolGroups`.
+
+- **Agent Integration**
+  - Updated agent creation logic to resolve tools from `allToolsMap` using tool IDs.
+  - Added robust error logging and throwing for missing tools in agent configs.
+  - Ensured all tools (including new/updated ones) are available to agents via the barrel file.
+
+### Changed
+
+- **General**
+  - Standardized tool registration and output schema patching across all Mastra tools.
+  - Improved documentation and inline comments for tool and agent registration patterns.
+  - Cleaned up and clarified environment variable requirements in `envSchema`.
+
+### Fixed
+
+- Ensured all tools have explicit output schemas and are patched at registration, preventing runtime errors in Mastra workflows.
+- Fixed tool discovery and registration issues for new tools (arxiv, polygon, reddit) by updating the barrel file and tool initialization logic.
+
+### Notes
+
+- All new and updated tools follow the Mastra pattern: explicit Zod schemas, output schema patching, and unified exports.
+- Agents now reliably resolve and use all registered tools, with clear error messages if a tool is missing.
+- Next steps: Continue to lint and type-check after every file edit, and document any new tool or agent patterns in this changelog for future maintainers.
+
+---
+
 ## [v0.0.11] - 2025-04-19 12:00 UTC
 
 ### Added
@@ -123,7 +216,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ensured all lint/type errors are fixed after every file edit.  
 - Updated README and documentation to reflect new memory, RAG, and workflow patterns.  
 - Added csv-reader, docx-reader, tools  
-  
+ 
 - Date: 2025-04-15  
 - Time: 15:00 UTC
 

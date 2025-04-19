@@ -53,6 +53,7 @@ import { ChatAnthropic } from '@langchain/anthropic';
 import { PromptTemplate } from '@langchain/core/prompts';
 import { Langfuse } from 'langfuse';
 import { Octokit } from 'octokit';
+import { MCPConfiguration } from '@mastra/mcp';
 import { GithubIntegration } from '@mastra/github';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
@@ -3423,57 +3424,122 @@ function createMastraAISDKTools(...aiFunctionLikeTools) {
 
 const e2b = createAIFunction(
   {
-    name: "execute_python",
+    name: "execute_code",
     description: `
-Execute python code in a Jupyter notebook cell and returns any result, stdout, stderr, display_data, and error.
-
-- code has access to the internet and can make api requests
-- code has access to the filesystem and can read/write files
-- coce can install any pip package (if it exists) if you need to, but the usual packages for data analysis are already preinstalled
-- code uses python3
-- code is executed in a secure sandbox environment, so you don't need to worry about safety
-      `.trim(),
+Execute code in a secure E2B sandbox. Supports Python and TypeScript.
+- Specify the language ("python" or "typescript").
+- Optionally install packages before execution.
+- Optionally run shell commands before execution.
+- Optionally write files before execution.
+- Optionally set environment variables.
+- Optionally retrieve output files after execution.
+- Optionally set a timeout (ms) for code execution.
+- Code can access the internet, filesystem, and install packages.
+- Returns stdout, stderr, exit code, results, and output files.
+    `.trim(),
     inputSchema: z.object({
-      code: z.string().describe("Python code to execute in a single notebook cell.")
+      code: z.string().describe("Code to execute."),
+      language: z.enum(["python", "typescript"]).default("python"),
+      install: z.array(z.string()).optional().describe("Packages to install before running code."),
+      files: z.record(z.string(), z.string()).optional().describe("Additional files to write before execution. Keys are file paths, values are file contents."),
+      preCommands: z.array(z.string()).optional().describe("Shell commands to run before code execution (e.g., environment setup)."),
+      outputFiles: z.array(z.string()).optional().describe("Files to retrieve after execution."),
+      env: z.record(z.string(), z.string()).optional().describe("Environment variables for the execution."),
+      timeout: z.number().int().optional().describe("Timeout in milliseconds for code execution.")
     })
   },
-  async ({ code }) => {
+  async ({ code, language, install, files, preCommands, outputFiles, env, timeout }) => {
     const sandbox = await Sandbox.create({
       apiKey: getEnv("E2B_API_KEY")
     });
     try {
-      const exec = await sandbox.runCode(code, {
-        onStderr: (msg) => {
-          console.warn("[Code Interpreter stderr]", msg);
-        },
-        onStdout: (stdout) => {
-          console.log("[Code Interpreter stdout]", stdout);
+      if (files) {
+        for (const [filePath, content] of Object.entries(files)) {
+          await sandbox.files.write(filePath, content);
         }
-      });
-      if (exec.error) {
-        console.error("[Code Interpreter error]", exec.error);
-        throw new Error(exec.error.value);
       }
-      return exec.results.map((result) => result.toJSON());
+      if (preCommands && preCommands.length > 0) {
+        for (const cmd of preCommands) {
+          await sandbox.runCode(cmd, { envs: env });
+        }
+      }
+      if (install && install.length > 0) {
+        if (language === "python") {
+          await sandbox.runCode(`pip install ${install.join(" ")}`, { envs: env });
+        } else if (language === "typescript") {
+          await sandbox.runCode(`npm install ${install.join(" ")}`, { envs: env });
+        }
+      }
+      let exec;
+      if (language === "python") {
+        exec = await sandbox.runCode(code, {
+          onStderr: (msg) => console.warn("[E2B stderr]", msg),
+          onStdout: (msg) => console.log("[E2B stdout]", msg),
+          envs: env,
+          timeoutMs: timeout
+        });
+      } else if (language === "typescript") {
+        await sandbox.files.write("/main.ts", code);
+        await sandbox.runCode("npx tsc /main.ts", { envs: env, timeoutMs: timeout });
+        exec = await sandbox.runCode("node /main.js", {
+          onStderr: (msg) => console.warn("[E2B stderr]", msg),
+          onStdout: (msg) => console.log("[E2B stdout]", msg),
+          envs: env,
+          timeoutMs: timeout
+        });
+      } else {
+        throw new Error("Unsupported language");
+      }
+      if (exec.error) {
+        throw new Error(exec.error.value || String(exec.error));
+      }
+      let retrievedFiles = {};
+      if (outputFiles && outputFiles.length > 0) {
+        for (const file of outputFiles) {
+          try {
+            retrievedFiles[file] = await sandbox.files.read(file);
+          } catch {
+            retrievedFiles[file] = null;
+          }
+        }
+      }
+      return {
+        results: exec.results ? exec.results.map((r) => r.toJSON?.() ?? r) : [],
+        stdout: exec.stdout ?? "",
+        stderr: exec.stderr ?? "",
+        exitCode: exec.exitCode ?? 0,
+        outputFiles: retrievedFiles
+      };
+    } catch (err) {
+      return {
+        results: [],
+        stdout: "",
+        stderr: err?.message || String(err),
+        exitCode: -1,
+        error: true,
+        outputFiles: {}
+      };
     } finally {
       await sandbox.kill();
     }
   }
 );
+const E2BOutputSchema = z.object({
+  results: z.array(z.any()),
+  stdout: z.string(),
+  stderr: z.string(),
+  exitCode: z.number(),
+  outputFiles: z.record(z.string(), z.string().nullable()),
+  error: z.boolean().optional()
+});
 function createE2BSandboxTool(config = {}) {
   return e2b;
 }
-const E2BOutputSchema = z.array(
-  z.object({
-    type: z.string(),
-    value: z.any()
-  })
-);
 function createMastraE2BTools(config = {}) {
   const e2bTool = createE2BSandboxTool(config);
   const mastraTools = createMastraTools(e2bTool);
-  if (mastraTools.execute_python) {
-    mastraTools.execute_python.outputSchema = E2BOutputSchema;
+  if (mastraTools.execute_code) {
+    mastraTools.execute_code.outputSchema = E2BOutputSchema;
   }
   return mastraTools;
 }
@@ -4267,6 +4333,30 @@ function createMastraGitHubTools(config = {}) {
     mastraTools.github_search_code.outputSchema = GitHubCodeSearchResultsSchema;
   }
   return mastraTools;
+}
+
+async function createMastraMcpTools(config) {
+  const mcp = new MCPConfiguration({
+    servers: config?.servers ?? {
+      mastra: {
+        command: "npx",
+        args: ["-y", "@mastra/mcp-docs-server@latest"]
+      },
+      docker: {
+        command: "docker",
+        args: [
+          "run",
+          "-i",
+          "--rm",
+          "alpine/socat",
+          "STDIO",
+          "TCP:host.docker.internal:8811"
+        ]
+      }
+    },
+    timeout: config?.timeout ?? 3e4
+  });
+  return await mcp.getTools();
 }
 
 const github = new GithubIntegration({
@@ -5099,7 +5189,7 @@ var __decorateElement$1 = (array, flags, name, decorators, target, extra) => {
   return desc && __defProp$1(target, name, desc), target;
 };
 var __publicField$1 = (obj, key, value) => __defNormalProp$1(obj, key + "" , value);
-var _tickerDetails_dec, _a$1, _init$1;
+var _cryptoTickers_dec, _cryptoPrice_dec, _cryptoAggregates_dec, _tickerPreviousClose_dec, _tickerAggregates_dec, _tickerNews_dec, _tickerDetails_dec, _a$1, _init$1;
 const TickerDetailsSchema = z.object({
   ticker: z.string(),
   name: z.string(),
@@ -5113,18 +5203,181 @@ const TickerDetailsSchema = z.object({
   composite_figi: z.string().optional(),
   share_class_figi: z.string().optional(),
   last_updated_utc: z.string().optional()
-  // Add more fields as needed based on Polygon API response
 }).partial();
+const TickerNewsSchema = z.object({
+  results: z.array(z.object({
+    id: z.string(),
+    publisher: z.object({
+      name: z.string(),
+      homepage_url: z.string().optional(),
+      logo_url: z.string().optional(),
+      favicon_url: z.string().optional()
+    }),
+    title: z.string(),
+    author: z.string().optional(),
+    published_utc: z.string(),
+    article_url: z.string(),
+    tickers: z.array(z.string()),
+    description: z.string().optional(),
+    keywords: z.array(z.string()).optional(),
+    image_url: z.string().optional()
+  })),
+  status: z.string(),
+  request_id: z.string(),
+  count: z.number().optional()
+});
+const TickerAggregatesSchema = z.object({
+  results: z.array(z.object({
+    v: z.number(),
+    // Volume
+    vw: z.number(),
+    // Volume weighted
+    o: z.number(),
+    // Open
+    c: z.number(),
+    // Close
+    h: z.number(),
+    // High
+    l: z.number(),
+    // Low
+    t: z.number(),
+    // Timestamp (ms)
+    n: z.number()
+    // Number of transactions
+  })),
+  ticker: z.string(),
+  status: z.string(),
+  queryCount: z.number(),
+  resultsCount: z.number(),
+  adjusted: z.boolean(),
+  request_id: z.string(),
+  count: z.number()
+});
+const PreviousCloseSchema = z.object({
+  ticker: z.string(),
+  status: z.string(),
+  adjusted: z.boolean().optional(),
+  queryCount: z.number().optional(),
+  resultsCount: z.number().optional(),
+  request_id: z.string().optional(),
+  results: z.array(z.object({
+    v: z.number(),
+    // Volume
+    vw: z.number(),
+    // Volume weighted
+    o: z.number(),
+    // Open
+    c: z.number(),
+    // Close
+    h: z.number(),
+    // High
+    l: z.number(),
+    // Low
+    t: z.number(),
+    // Timestamp (ms)
+    n: z.number()
+    // Number of transactions
+  }))
+});
+const CryptoAggregatesSchema = z.object({
+  results: z.array(z.object({
+    v: z.number(),
+    // Volume
+    vw: z.number(),
+    // Volume weighted
+    o: z.number(),
+    // Open
+    c: z.number(),
+    // Close
+    h: z.number(),
+    // High
+    l: z.number(),
+    // Low
+    t: z.number(),
+    // Timestamp (ms)
+    n: z.number()
+    // Number of transactions
+  })),
+  ticker: z.string(),
+  status: z.string(),
+  queryCount: z.number(),
+  resultsCount: z.number(),
+  adjusted: z.boolean().optional(),
+  request_id: z.string(),
+  count: z.number()
+});
+const CryptoTickersSchema = z.object({
+  results: z.array(z.object({
+    ticker: z.string(),
+    name: z.string().optional(),
+    market: z.string().optional(),
+    locale: z.string().optional(),
+    active: z.boolean().optional(),
+    currency_name: z.string().optional(),
+    base_currency_symbol: z.string().optional(),
+    base_currency_name: z.string().optional(),
+    quote_currency_symbol: z.string().optional(),
+    quote_currency_name: z.string().optional(),
+    updated_utc: z.string().optional()
+  })),
+  status: z.string(),
+  request_id: z.string(),
+  count: z.number().optional()
+});
 class MastraPolygonClient extends (_a$1 = AIFunctionsProvider, _tickerDetails_dec = [aiFunction({
   name: "tickerDetails",
   description: "Get details for a given stock ticker symbol using Polygon.io.",
   inputSchema: z.object({
     ticker: z.string().describe("The stock ticker symbol (e.g., AAPL, MSFT)")
   })
+})], _tickerNews_dec = [aiFunction({
+  name: "tickerNews",
+  description: "Get recent news articles for a given stock ticker symbol using Polygon.io.",
+  inputSchema: z.object({
+    ticker: z.string().describe("The stock ticker symbol (e.g., AAPL, MSFT)"),
+    limit: z.number().int().min(1).max(50).default(10).optional()
+  })
+})], _tickerAggregates_dec = [aiFunction({
+  name: "tickerAggregates",
+  description: "Get daily OHLCV (open, high, low, close, volume) aggregates for a ticker and date range.",
+  inputSchema: z.object({
+    ticker: z.string().describe("The stock ticker symbol (e.g., AAPL, MSFT)"),
+    from: z.string().describe("Start date (YYYY-MM-DD)"),
+    to: z.string().describe("End date (YYYY-MM-DD)"),
+    adjusted: z.boolean().optional().default(true),
+    limit: z.number().int().min(1).max(5e3).optional()
+  })
+})], _tickerPreviousClose_dec = [aiFunction({
+  name: "tickerPreviousClose",
+  description: "Get the previous day's open, high, low, and close (OHLC) for a given stock ticker symbol using Polygon.io.",
+  inputSchema: z.object({
+    ticker: z.string().describe("The stock ticker symbol (e.g., AAPL, MSFT)")
+  })
+})], _cryptoAggregates_dec = [aiFunction({
+  name: "cryptoAggregates",
+  description: "Get daily OHLCV (open, high, low, close, volume) aggregates for a crypto pair and date range.",
+  inputSchema: z.object({
+    from: z.string().describe("Crypto symbol (e.g., BTC)"),
+    to: z.string().describe("Quote currency (e.g., USD)"),
+    start: z.string().describe("Start date (YYYY-MM-DD)"),
+    end: z.string().describe("End date (YYYY-MM-DD)"),
+    limit: z.number().int().min(1).max(5e3).optional()
+  })
+})], _cryptoPrice_dec = [aiFunction({
+  name: "cryptoPrice",
+  description: "Get the most recent daily closing price for a crypto pair (e.g., BTC-USD) using Polygon.io.",
+  inputSchema: z.object({
+    from: z.string().describe("Crypto symbol (e.g., BTC)"),
+    to: z.string().describe("Quote currency (e.g., USD)")
+  })
+})], _cryptoTickers_dec = [aiFunction({
+  name: "cryptoTickers",
+  description: "List all supported crypto tickers from Polygon.io.",
+  inputSchema: z.object({
+    search: z.string().optional().describe("Search query for filtering tickers"),
+    limit: z.number().int().min(1).max(1e3).optional()
+  })
 })], _a$1) {
-  /**
-   * @param apiKey Polygon.io API key (required)
-   */
   constructor({ apiKey }) {
     super();
     __runInitializers$1(_init$1, 5, this);
@@ -5143,9 +5396,178 @@ class MastraPolygonClient extends (_a$1 = AIFunctionsProvider, _tickerDetails_de
       };
     }
   }
+  async tickerNews({ ticker, limit }) {
+    try {
+      const news = await this.client.tickerNews({ ticker, limit });
+      return news;
+    } catch (error) {
+      return {
+        error: true,
+        message: error?.message || "Unknown error fetching ticker news."
+      };
+    }
+  }
+  async tickerAggregates({
+    ticker,
+    from,
+    to,
+    adjusted = true,
+    limit
+  }) {
+    try {
+      const aggregates = await this.client.aggregates({
+        ticker,
+        multiplier: 1,
+        timespan: "day",
+        from,
+        to,
+        adjusted,
+        limit
+      });
+      return aggregates;
+    } catch (error) {
+      return {
+        error: true,
+        message: error?.message || "Unknown error fetching ticker aggregates."
+      };
+    }
+  }
+  async tickerPreviousClose({ ticker }) {
+    try {
+      const prevCloseData = await this.client.previousClose(ticker);
+      return prevCloseData;
+    } catch (error) {
+      return {
+        error: true,
+        message: error?.message || "Unknown error fetching ticker price."
+      };
+    }
+  }
+  async cryptoAggregates({
+    from,
+    to,
+    start,
+    end,
+    limit
+  }) {
+    try {
+      const ticker = `X:${from}${to}`;
+      const aggregates = await this.client.aggregates({
+        ticker,
+        multiplier: 1,
+        timespan: "day",
+        from: start,
+        to: end,
+        limit
+      });
+      return aggregates;
+    } catch (error) {
+      return {
+        error: true,
+        message: error?.message || "Unknown error fetching crypto aggregates."
+      };
+    }
+  }
+  async cryptoPrice({ from, to }) {
+    try {
+      const ticker = `X:${from}${to}`;
+      const today = /* @__PURE__ */ new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      const toDateStr = today.toISOString().split("T")[0];
+      const fromDateStr = yesterday.toISOString().split("T")[0];
+      const aggregates = await this.client.aggregates({
+        ticker,
+        multiplier: 1,
+        timespan: "day",
+        from: fromDateStr,
+        to: toDateStr,
+        limit: 2
+        // Get up to two bars (yesterday and today)
+      });
+      const latestBar = aggregates.results?.sort((a, b) => b.t - a.t)[0];
+      if (latestBar) {
+        return {
+          symbol: `${from}-${to}`,
+          price: latestBar.c,
+          // Use the closing price
+          volume: latestBar.v,
+          timestamp: latestBar.t
+        };
+      } else {
+        return {
+          error: true,
+          message: `No recent price data found for ${from}-${to}.`
+        };
+      }
+    } catch (error) {
+      return {
+        error: true,
+        message: error?.message || "Unknown error fetching crypto price."
+      };
+    }
+  }
+  async cryptoTickers({ search, limit }) {
+    try {
+      const params = { market: "crypto" };
+      if (search) params.search = search;
+      if (limit) params.limit = limit;
+      const result = await this.client.tickers(params);
+      return result;
+    } catch (error) {
+      return {
+        error: true,
+        message: error?.message || "Unknown error fetching crypto tickers."
+      };
+    }
+  }
+  // @aiFunction({
+  //   name: "cryptoSnapshotAll",
+  //   description: "Get snapshot data for all supported crypto tickers from Polygon.io.",
+  //   inputSchema: z.object({}),
+  // })
+  // async cryptoSnapshotAll() {
+  //   try {
+  //     // TODO: Implement using direct API call if needed, client doesn't support this.
+  //     // const result = await this.client.cryptoSnapshotAll();
+  //     // return result;
+  //     throw new Error("cryptoSnapshotAll is not implemented in the underlying client.");
+  //   } catch (error: any) {
+  //     return {
+  //       error: true,
+  //       message: error?.message || "Unknown error fetching crypto snapshot (all).",
+  //     };
+  //   }
+  // }
+  // @aiFunction({
+  //   name: "cryptoSnapshotTicker",
+  //   description: "Get snapshot data for a single crypto ticker from Polygon.io.",
+  //   inputSchema: z.object({
+  //     ticker: z.string().describe("The crypto ticker symbol (e.g., X:BTCUSD)"),
+  //   }),
+  // })
+  // async cryptoSnapshotTicker({ ticker }: { ticker: string }) {
+  //   try {
+  //     // TODO: Implement using direct API call if needed, client doesn't support this.
+  //     // const result = await this.client.cryptoSnapshotTicker({ ticker });
+  //     // return result;
+  //      throw new Error("cryptoSnapshotTicker is not implemented in the underlying client.");
+  //   } catch (error: any) {
+  //     return {
+  //       error: true,
+  //       message: error?.message || "Unknown error fetching crypto snapshot (ticker).",
+  //     };
+  //   }
+  // }
 }
 _init$1 = __decoratorStart$1(_a$1);
 __decorateElement$1(_init$1, 1, "tickerDetails", _tickerDetails_dec, MastraPolygonClient);
+__decorateElement$1(_init$1, 1, "tickerNews", _tickerNews_dec, MastraPolygonClient);
+__decorateElement$1(_init$1, 1, "tickerAggregates", _tickerAggregates_dec, MastraPolygonClient);
+__decorateElement$1(_init$1, 1, "tickerPreviousClose", _tickerPreviousClose_dec, MastraPolygonClient);
+__decorateElement$1(_init$1, 1, "cryptoAggregates", _cryptoAggregates_dec, MastraPolygonClient);
+__decorateElement$1(_init$1, 1, "cryptoPrice", _cryptoPrice_dec, MastraPolygonClient);
+__decorateElement$1(_init$1, 1, "cryptoTickers", _cryptoTickers_dec, MastraPolygonClient);
 __decoratorMetadata$1(_init$1, MastraPolygonClient);
 function createMastraPolygonTools(config = {}) {
   const apiKey = config.apiKey ?? getEnv("POLYGON_API_KEY");
@@ -5154,6 +5576,21 @@ function createMastraPolygonTools(config = {}) {
   const mastraTools = createMastraTools(polygonClient);
   if (mastraTools.tickerDetails) {
     mastraTools.tickerDetails.outputSchema = TickerDetailsSchema;
+  }
+  if (mastraTools.tickerNews) {
+    mastraTools.tickerNews.outputSchema = TickerNewsSchema;
+  }
+  if (mastraTools.tickerAggregates) {
+    mastraTools.tickerAggregates.outputSchema = TickerAggregatesSchema;
+  }
+  if (mastraTools.cryptoTickers) {
+    mastraTools.cryptoTickers.outputSchema = CryptoTickersSchema;
+  }
+  if (mastraTools.tickerPreviousClose) {
+    mastraTools.tickerPreviousClose.outputSchema = PreviousCloseSchema;
+  }
+  if (mastraTools.cryptoAggregates) {
+    mastraTools.cryptoAggregates.outputSchema = CryptoAggregatesSchema;
   }
   return mastraTools;
 }
@@ -5882,6 +6319,16 @@ try {
   });
 }
 try {
+  const mcpToolsObject = await createMastraMcpTools();
+  const mcpToolsArray = Object.values(mcpToolsObject);
+  extraTools.push(...mcpToolsArray.map((tool) => tool));
+  logger.info(`Added ${mcpToolsArray.length} MCP tools.`);
+} catch (error) {
+  logger.error("Failed to initialize MCP tools:", {
+    error
+  });
+}
+try {
   const arxivToolsObject = createMastraArxivTools();
   const arxivToolsArray = Object.values(arxivToolsObject);
   extraTools.push(...arxivToolsArray.map((tool) => tool));
@@ -5996,4 +6443,4 @@ logger.info(`E2B tools included: ${extraTools.some((t) => t.id.startsWith("e2b_"
 logger.info(`Arxiv tools included: ${extraTools.some((t) => t.id.startsWith("arxiv_"))}`);
 logger.info(`AI SDK tools included: ${extraTools.some((t) => t.id.startsWith("ai-sdk_"))}`);
 
-export { AiSdkPromptOutputSchema, ArXivClient, ArxivDownloadPdfOutputSchema, ArxivPdfUrlOutputSchema, ArxivSearchEntrySchema, ArxivSearchOutputSchema, E2BOutputSchema, createExaSearchProvider as ExaSearchOutputSchema, ExaSearchProvider, FeedbackType, FileEncoding, FileWriteMode, GitHubBranchSchema, GitHubBranchesListSchema, GitHubClient, GitHubCodeSearchItemSchema, GitHubCodeSearchResultsSchema, GitHubCommitSchema, GitHubCommitsListSchema, GitHubIssueSchema, GitHubIssuesListSchema, GitHubPullSchema, GitHubPullsListSchema, GitHubReleaseSchema, GitHubReleasesListSchema, GitHubRepoSchema, GitHubReposListSchema, GitHubUserSchema, LLMChainOutputSchema, MastraPolygonClient, MastraRedditClient, RewardType, SubredditPostSchema, SubredditPostsSchema, TickerDetailsSchema, WikipediaClient, WikipediaPageResultSchema, WikipediaSearchSchema, WikipediaSummarySchema, WikipediaThumbnailSchema, aiSdkPromptTool, allTools, allToolsMap, analyzeContentTool, analyzeFeedbackTool, applyRLInsightsTool, arxiv, calculateRewardTool, calculatorTool as calculator, collectFeedbackTool, createAISDKTools, createAISpan, createArxivClient, createBraveSearchTool, createE2BSandboxTool, createExaSearchProvider, createFileTool, createGitHubClient, createGoogleSearchTool, createGraphRagTool, createHttpSpan, createLlamaIndexTools, createMastraAISDKTools, createMastraArxivTools, createMastraE2BTools, createMastraExaSearchTools, createMastraGitHubTools, createMastraLLMChainTools, createMastraLlamaIndexTools, createMastraPolygonTools, createMastraRedditTools, createMastraVectorQueryTool, createMastraWikipediaTools, createTavilySearchTool, createWikipediaClient, csvReaderTool, allToolsMap as default, defineRewardFunctionTool, deleteFileTool, docxReaderTool, e2b, editFileTool, embedDocumentTool, extractHtmlTextTool, filteredQueryTool, formatContentTool, getMainBranchRef, getOpenTelemetrySdk, getTracer, getUnreadFeedbackThreads, googleVectorQueryTool, graphRagQueryTool, toolGroups as groups, initOpenTelemetry, initOpenTelemetryTool, initSigNoz, initializeDefaultTracing, jsonReaderTool, listFilesTool, llmChainTool, optimizePolicyTool, readFileTool, readKnowledgeFileTool, recordLlmMetrics, recordLlmMetricsTool, recordMetrics, searchDocumentsTool, shutdownSigNoz, shutdownTracingTool, startAISpanTool, toolGroups, allToolsMap as toolMap, tracingTools, vectorQueryTool, wikipedia, writeKnowledgeFileTool, writeToFileTool };
+export { AiSdkPromptOutputSchema, ArXivClient, ArxivDownloadPdfOutputSchema, ArxivPdfUrlOutputSchema, ArxivSearchEntrySchema, ArxivSearchOutputSchema, CryptoAggregatesSchema, CryptoTickersSchema, E2BOutputSchema, createExaSearchProvider as ExaSearchOutputSchema, ExaSearchProvider, FeedbackType, FileEncoding, FileWriteMode, GitHubBranchSchema, GitHubBranchesListSchema, GitHubClient, GitHubCodeSearchItemSchema, GitHubCodeSearchResultsSchema, GitHubCommitSchema, GitHubCommitsListSchema, GitHubIssueSchema, GitHubIssuesListSchema, GitHubPullSchema, GitHubPullsListSchema, GitHubReleaseSchema, GitHubReleasesListSchema, GitHubRepoSchema, GitHubReposListSchema, GitHubUserSchema, LLMChainOutputSchema, MastraPolygonClient, MastraRedditClient, PreviousCloseSchema, RewardType, SubredditPostSchema, SubredditPostsSchema, TickerAggregatesSchema, TickerDetailsSchema, TickerNewsSchema, WikipediaClient, WikipediaPageResultSchema, WikipediaSearchSchema, WikipediaSummarySchema, WikipediaThumbnailSchema, aiSdkPromptTool, allTools, allToolsMap, analyzeContentTool, analyzeFeedbackTool, applyRLInsightsTool, arxiv, calculateRewardTool, calculatorTool as calculator, collectFeedbackTool, createAISDKTools, createAISpan, createArxivClient, createBraveSearchTool, createE2BSandboxTool, createExaSearchProvider, createFileTool, createGitHubClient, createGoogleSearchTool, createGraphRagTool, createHttpSpan, createLlamaIndexTools, createMastraAISDKTools, createMastraArxivTools, createMastraE2BTools, createMastraExaSearchTools, createMastraGitHubTools, createMastraLLMChainTools, createMastraLlamaIndexTools, createMastraMcpTools, createMastraPolygonTools, createMastraRedditTools, createMastraVectorQueryTool, createMastraWikipediaTools, createTavilySearchTool, createWikipediaClient, csvReaderTool, allToolsMap as default, defineRewardFunctionTool, deleteFileTool, docxReaderTool, e2b, editFileTool, embedDocumentTool, extractHtmlTextTool, filteredQueryTool, formatContentTool, getMainBranchRef, getOpenTelemetrySdk, getTracer, getUnreadFeedbackThreads, googleVectorQueryTool, graphRagQueryTool, toolGroups as groups, initOpenTelemetry, initOpenTelemetryTool, initSigNoz, initializeDefaultTracing, jsonReaderTool, listFilesTool, llmChainTool, optimizePolicyTool, readFileTool, readKnowledgeFileTool, recordLlmMetrics, recordLlmMetricsTool, recordMetrics, searchDocumentsTool, shutdownSigNoz, shutdownTracingTool, startAISpanTool, toolGroups, allToolsMap as toolMap, tracingTools, vectorQueryTool, wikipedia, writeKnowledgeFileTool, writeToFileTool };

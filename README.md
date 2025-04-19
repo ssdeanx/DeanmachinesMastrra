@@ -609,7 +609,6 @@ If you are a new contributor or AI assistant, please review this README and the 
 
 ```mermaid
 graph TD
-
     subgraph 10848["External Systems"]
         10905["File System<br>Local OS"]
         10906["AI Frameworks<br>Genkit / LlamaIndex / LangChain"]
@@ -684,6 +683,7 @@ graph TD
         end
     end
     %% Edges at this level (grouped by source)
+    10873["Core Tool Implementations<br>TypeScript"] -->|interact with| 10905["File System<br>Local OS"]
     10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10894["Wikidata<br>External API"]
     10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10895["Wikipedia<br>External API"]
     10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10896["ArXiv<br>External API"]
@@ -700,7 +700,6 @@ graph TD
     10874["External Tool Adapters<br>TypeScript"] -->|use| 10902["Web Automation Services<br>Hyperbrowser / Puppeteer"]
     10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10904["Image Generation Services<br>Midjourney"]
     10874["External Tool Adapters<br>TypeScript"] -->|use| 10906["AI Frameworks<br>Genkit / LlamaIndex / LangChain"]
-    10873["Core Tool Implementations<br>TypeScript"] -->|interact with| 10905["File System<br>Local OS"]
     10877["Voice Service<br>TypeScript"] -->|connect to| 10903["Voice Services<br>Google Voice / ElevenLabs"]
     10876["Database Interfaces<br>TypeScript"] -->|connect to| 10886["Vector Databases<br>Pinecone / Upstash Vector"]
     10876["Database Interfaces<br>TypeScript"] -->|connect to| 10887["Relational Databases<br>LibSQL"]

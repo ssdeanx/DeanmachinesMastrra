@@ -151,7 +151,6 @@ export const analystAgentConfig: BaseAgentConfig = {
     "token-count-eval",
     "create-graph-rag",
     "graph-rag-query",
-    "execute_python",
     "wikipedia_get_page_summary",
     "context-precision-eval",
     "embed-document",
@@ -159,6 +158,7 @@ export const analystAgentConfig: BaseAgentConfig = {
     "tickerDetails",
     "arxiv_pdf_url",
     "arxiv_download_pdf",
+    "execute_code",
   ],
 };
 
