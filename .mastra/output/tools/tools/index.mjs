@@ -16,7 +16,7 @@ export { createMastraTools } from '@agentic/mastra';
 import Exa from 'exa-js';
 import * as fs from 'fs-extra';
 import fs__default from 'fs-extra';
-import { resolve, extname, dirname, join } from 'path';
+import path, { resolve, extname, dirname, join } from 'path';
 import { Client } from 'langsmith';
 import { v4 } from 'uuid';
 import { LibSQLStore } from '@mastra/core/storage/libsql';
@@ -56,6 +56,8 @@ import { Octokit } from 'octokit';
 import { GithubIntegration } from '@mastra/github';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+import { PolygonClient } from '@agentic/polygon';
+import { RedditClient } from '@agentic/reddit';
 import { create, all } from 'mathjs';
 
 class MastraEmbeddingAdapter extends GoogleGenerativeAIEmbeddings {
@@ -505,41 +507,41 @@ async function searchForRAG(query, config = {}) {
   return formattedResults;
 }
 
-var __create$3 = Object.create;
-var __defProp$3 = Object.defineProperty;
-var __getOwnPropDesc$3 = Object.getOwnPropertyDescriptor;
-var __knownSymbol$3 = (name, symbol) => (symbol = Symbol[name]) ? symbol : Symbol.for("Symbol." + name);
-var __typeError$3 = (msg) => {
+var __create$5 = Object.create;
+var __defProp$5 = Object.defineProperty;
+var __getOwnPropDesc$5 = Object.getOwnPropertyDescriptor;
+var __knownSymbol$5 = (name, symbol) => (symbol = Symbol[name]) ? symbol : Symbol.for("Symbol." + name);
+var __typeError$5 = (msg) => {
   throw TypeError(msg);
 };
-var __defNormalProp$3 = (obj, key, value) => key in obj ? __defProp$3(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __decoratorStart$3 = (base) => [, , , __create$3(base?.[__knownSymbol$3("metadata")] ?? null)];
-var __decoratorStrings$3 = ["class", "method", "getter", "setter", "accessor", "field", "value", "get", "set"];
-var __expectFn$3 = (fn) => fn !== void 0 && typeof fn !== "function" ? __typeError$3("Function expected") : fn;
-var __decoratorContext$3 = (kind, name, done, metadata, fns) => ({ kind: __decoratorStrings$3[kind], name, metadata, addInitializer: (fn) => done._ ? __typeError$3("Already initialized") : fns.push(__expectFn$3(fn || null)) });
-var __decoratorMetadata$3 = (array, target) => __defNormalProp$3(target, __knownSymbol$3("metadata"), array[3]);
-var __runInitializers$3 = (array, flags, self, value) => {
+var __defNormalProp$5 = (obj, key, value) => key in obj ? __defProp$5(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __decoratorStart$5 = (base) => [, , , __create$5(base?.[__knownSymbol$5("metadata")] ?? null)];
+var __decoratorStrings$5 = ["class", "method", "getter", "setter", "accessor", "field", "value", "get", "set"];
+var __expectFn$5 = (fn) => fn !== void 0 && typeof fn !== "function" ? __typeError$5("Function expected") : fn;
+var __decoratorContext$5 = (kind, name, done, metadata, fns) => ({ kind: __decoratorStrings$5[kind], name, metadata, addInitializer: (fn) => done._ ? __typeError$5("Already initialized") : fns.push(__expectFn$5(fn || null)) });
+var __decoratorMetadata$5 = (array, target) => __defNormalProp$5(target, __knownSymbol$5("metadata"), array[3]);
+var __runInitializers$5 = (array, flags, self, value) => {
   for (var i = 0, fns = array[flags >> 1], n = fns && fns.length; i < n; i++) fns[i].call(self) ;
   return value;
 };
-var __decorateElement$3 = (array, flags, name, decorators, target, extra) => {
+var __decorateElement$5 = (array, flags, name, decorators, target, extra) => {
   var it, done, ctx, access, k = flags & 7, s = false, p = false;
-  var j = 2 , key = __decoratorStrings$3[k + 5];
+  var j = 2 , key = __decoratorStrings$5[k + 5];
   var extraInitializers = array[j] || (array[j] = []);
-  var desc = ((target = target.prototype), __getOwnPropDesc$3(target , name));
+  var desc = ((target = target.prototype), __getOwnPropDesc$5(target , name));
   for (var i = decorators.length - 1; i >= 0; i--) {
-    ctx = __decoratorContext$3(k, name, done = {}, array[3], extraInitializers);
+    ctx = __decoratorContext$5(k, name, done = {}, array[3], extraInitializers);
     {
       ctx.static = s, ctx.private = p, access = ctx.access = { has: (x) => name in x };
       access.get = (x) => x[name];
     }
     it = (0, decorators[i])(desc[key]  , ctx), done._ = 1;
-    __expectFn$3(it) && (desc[key] = it );
+    __expectFn$5(it) && (desc[key] = it );
   }
-  return desc && __defProp$3(target, name, desc), target;
+  return desc && __defProp$5(target, name, desc), target;
 };
-var __publicField$3 = (obj, key, value) => __defNormalProp$3(obj, key + "" , value);
-var _search_dec$2, _a$3, _init$3;
+var __publicField$5 = (obj, key, value) => __defNormalProp$5(obj, key + "" , value);
+var _search_dec$2, _a$5, _init$5;
 const ExaSearchInputSchema = z.object({
   query: z.string().describe("The search query to execute"),
   numResults: z.number().optional().default(5),
@@ -564,12 +566,12 @@ const ExaSearchOutputSchema = z.object({
   ),
   error: z.string().optional()
 });
-class ExaSearchProvider extends (_a$3 = AIFunctionsProvider, _search_dec$2 = [aiFunction({
+class ExaSearchProvider extends (_a$5 = AIFunctionsProvider, _search_dec$2 = [aiFunction({
   name: "exa_search",
   description: "Performs web searches using Exa search API with various filtering options",
   inputSchema: ExaSearchInputSchema
   // outputSchema removed, patch after createMastraTools
-})], _a$3) {
+})], _a$5) {
   /**
    * Initializes the ExaSearchProvider.
    * @param {object} [config] - Configuration options.
@@ -577,8 +579,8 @@ class ExaSearchProvider extends (_a$3 = AIFunctionsProvider, _search_dec$2 = [ai
    */
   constructor(config) {
     super();
-    __runInitializers$3(_init$3, 5, this);
-    __publicField$3(this, "apiKey");
+    __runInitializers$5(_init$5, 5, this);
+    __publicField$5(this, "apiKey");
     this.apiKey = config?.apiKey;
   }
   async search(input) {
@@ -610,9 +612,9 @@ class ExaSearchProvider extends (_a$3 = AIFunctionsProvider, _search_dec$2 = [ai
     }
   }
 }
-_init$3 = __decoratorStart$3(_a$3);
-__decorateElement$3(_init$3, 1, "search", _search_dec$2, ExaSearchProvider);
-__decoratorMetadata$3(_init$3, ExaSearchProvider);
+_init$5 = __decoratorStart$5(_a$5);
+__decorateElement$5(_init$5, 1, "search", _search_dec$2, ExaSearchProvider);
+__decoratorMetadata$5(_init$5, ExaSearchProvider);
 function createExaSearchProvider(config) {
   return new ExaSearchProvider(config);
 }
@@ -2967,41 +2969,41 @@ function castArray(arr) {
   return result;
 }
 
-var __create$2 = Object.create;
-var __defProp$2 = Object.defineProperty;
-var __getOwnPropDesc$2 = Object.getOwnPropertyDescriptor;
-var __knownSymbol$2 = (name, symbol) => (symbol = Symbol[name]) ? symbol : Symbol.for("Symbol." + name);
-var __typeError$2 = (msg) => {
+var __create$4 = Object.create;
+var __defProp$4 = Object.defineProperty;
+var __getOwnPropDesc$4 = Object.getOwnPropertyDescriptor;
+var __knownSymbol$4 = (name, symbol) => (symbol = Symbol[name]) ? symbol : Symbol.for("Symbol." + name);
+var __typeError$4 = (msg) => {
   throw TypeError(msg);
 };
-var __defNormalProp$2 = (obj, key, value) => key in obj ? __defProp$2(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __decoratorStart$2 = (base) => [, , , __create$2(base?.[__knownSymbol$2("metadata")] ?? null)];
-var __decoratorStrings$2 = ["class", "method", "getter", "setter", "accessor", "field", "value", "get", "set"];
-var __expectFn$2 = (fn) => fn !== void 0 && typeof fn !== "function" ? __typeError$2("Function expected") : fn;
-var __decoratorContext$2 = (kind, name, done, metadata, fns) => ({ kind: __decoratorStrings$2[kind], name, metadata, addInitializer: (fn) => done._ ? __typeError$2("Already initialized") : fns.push(__expectFn$2(fn || null)) });
-var __decoratorMetadata$2 = (array, target) => __defNormalProp$2(target, __knownSymbol$2("metadata"), array[3]);
-var __runInitializers$2 = (array, flags, self, value) => {
+var __defNormalProp$4 = (obj, key, value) => key in obj ? __defProp$4(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __decoratorStart$4 = (base) => [, , , __create$4(base?.[__knownSymbol$4("metadata")] ?? null)];
+var __decoratorStrings$4 = ["class", "method", "getter", "setter", "accessor", "field", "value", "get", "set"];
+var __expectFn$4 = (fn) => fn !== void 0 && typeof fn !== "function" ? __typeError$4("Function expected") : fn;
+var __decoratorContext$4 = (kind, name, done, metadata, fns) => ({ kind: __decoratorStrings$4[kind], name, metadata, addInitializer: (fn) => done._ ? __typeError$4("Already initialized") : fns.push(__expectFn$4(fn || null)) });
+var __decoratorMetadata$4 = (array, target) => __defNormalProp$4(target, __knownSymbol$4("metadata"), array[3]);
+var __runInitializers$4 = (array, flags, self, value) => {
   for (var i = 0, fns = array[flags >> 1], n = fns && fns.length; i < n; i++) fns[i].call(self) ;
   return value;
 };
-var __decorateElement$2 = (array, flags, name, decorators, target, extra) => {
+var __decorateElement$4 = (array, flags, name, decorators, target, extra) => {
   var it, done, ctx, access, k = flags & 7, s = false, p = false;
-  var j = 2 , key = __decoratorStrings$2[k + 5];
+  var j = 2 , key = __decoratorStrings$4[k + 5];
   var extraInitializers = array[j] || (array[j] = []);
-  var desc = ((target = target.prototype), __getOwnPropDesc$2(target , name));
+  var desc = ((target = target.prototype), __getOwnPropDesc$4(target , name));
   for (var i = decorators.length - 1; i >= 0; i--) {
-    ctx = __decoratorContext$2(k, name, done = {}, array[3], extraInitializers);
+    ctx = __decoratorContext$4(k, name, done = {}, array[3], extraInitializers);
     {
       ctx.static = s, ctx.private = p, access = ctx.access = { has: (x) => name in x };
       access.get = (x) => x[name];
     }
     it = (0, decorators[i])(desc[key]  , ctx), done._ = 1;
-    __expectFn$2(it) && (desc[key] = it );
+    __expectFn$4(it) && (desc[key] = it );
   }
-  return desc && __defProp$2(target, name, desc), target;
+  return desc && __defProp$4(target, name, desc), target;
 };
-var __publicField$2 = (obj, key, value) => __defNormalProp$2(obj, typeof key !== "symbol" ? key + "" : key, value);
-var _search_dec$1, _a$2, _init$2;
+var __publicField$4 = (obj, key, value) => __defNormalProp$4(obj, typeof key !== "symbol" ? key + "" : key, value);
+var _arxiv_download_pdf_dec, _arxivPdfUrl_dec, _search_dec$1, _a$4, _init$4;
 var arxiv;
 ((arxiv2) => {
   arxiv2.API_BASE_URL = "https://export.arxiv.org/api";
@@ -3057,19 +3059,30 @@ var arxiv;
     maxResults: z.number().int().min(1).max(100).default(5)
   }).describe("Sorting by date is not supported.");
 })(arxiv || (arxiv = {}));
-class ArXivClient extends (_a$2 = AIFunctionsProvider, _search_dec$1 = [aiFunction({
+class ArXivClient extends (_a$4 = AIFunctionsProvider, _search_dec$1 = [aiFunction({
   name: "arxiv_search",
   description: "Searches for research articles published on arXiv.",
   inputSchema: arxiv.SearchParamsSchema
-})], _a$2) {
+})], _arxivPdfUrl_dec = [aiFunction({
+  name: "arxiv_pdf_url",
+  description: "Get the direct PDF URL for a given arXiv ID.",
+  inputSchema: z.object({ id: z.string().describe("arXiv identifier, e.g. 2101.00001") })
+})], _arxiv_download_pdf_dec = [aiFunction({
+  name: "arxiv_download_pdf",
+  description: "Download the PDF for a given arXiv ID and save it to disk.",
+  inputSchema: z.object({
+    id: z.string().describe("arXiv identifier, e.g. 2101.00001"),
+    filePath: z.string().describe("Local file path to save the PDF")
+  })
+})], _a$4) {
   constructor({
     apiBaseUrl = arxiv.API_BASE_URL,
     ky = defaultKy
   }) {
     super();
-    __runInitializers$2(_init$2, 5, this);
-    __publicField$2(this, "ky");
-    __publicField$2(this, "apiBaseUrl");
+    __runInitializers$4(_init$4, 5, this);
+    __publicField$4(this, "ky");
+    __publicField$4(this, "apiBaseUrl");
     this.apiBaseUrl = apiBaseUrl;
     this.ky = ky.extend({
       prefixUrl: this.apiBaseUrl
@@ -3150,10 +3163,23 @@ class ArXivClient extends (_a$2 = AIFunctionsProvider, _search_dec$1 = [aiFuncti
       )
     };
   }
+  async arxivPdfUrl({ id }) {
+    return { url: `https://arxiv.org/pdf/${id}.pdf` };
+  }
+  async arxiv_download_pdf({ id, filePath }) {
+    const url = `https://arxiv.org/pdf/${id}.pdf`;
+    const response = await this.ky.get(url);
+    const buffer = await response.arrayBuffer();
+    await fs__default.ensureDir(path.dirname(filePath));
+    await fs__default.writeFile(filePath, Buffer.from(buffer));
+    return { filePath };
+  }
 }
-_init$2 = __decoratorStart$2(_a$2);
-__decorateElement$2(_init$2, 1, "search", _search_dec$1, ArXivClient);
-__decoratorMetadata$2(_init$2, ArXivClient);
+_init$4 = __decoratorStart$4(_a$4);
+__decorateElement$4(_init$4, 1, "search", _search_dec$1, ArXivClient);
+__decorateElement$4(_init$4, 1, "arxivPdfUrl", _arxivPdfUrl_dec, ArXivClient);
+__decorateElement$4(_init$4, 1, "arxiv_download_pdf", _arxiv_download_pdf_dec, ArXivClient);
+__decoratorMetadata$4(_init$4, ArXivClient);
 const ArxivSearchEntrySchema = z.object({
   id: z.string(),
   url: z.string(),
@@ -3178,6 +3204,12 @@ const ArxivSearchOutputSchema = z.object({
   itemsPerPage: z.number(),
   entries: z.array(ArxivSearchEntrySchema)
 });
+const ArxivPdfUrlOutputSchema = z.object({
+  url: z.string().url()
+});
+const ArxivDownloadPdfOutputSchema = z.object({
+  filePath: z.string()
+});
 function createArxivClient(config = {}) {
   return new ArXivClient(config);
 }
@@ -3187,44 +3219,50 @@ function createMastraArxivTools(config = {}) {
   if (mastraTools.arxiv_search) {
     mastraTools.arxiv_search.outputSchema = ArxivSearchOutputSchema;
   }
+  if (mastraTools.arxiv_pdf_url) {
+    mastraTools.arxiv_pdf_url.outputSchema = ArxivPdfUrlOutputSchema;
+  }
+  if (mastraTools.arxiv_download_pdf) {
+    mastraTools.arxiv_download_pdf.outputSchema = ArxivDownloadPdfOutputSchema;
+  }
   return mastraTools;
 }
 
-var __create$1 = Object.create;
-var __defProp$1 = Object.defineProperty;
-var __getOwnPropDesc$1 = Object.getOwnPropertyDescriptor;
-var __knownSymbol$1 = (name, symbol) => (symbol = Symbol[name]) ? symbol : Symbol.for("Symbol." + name);
-var __typeError$1 = (msg) => {
+var __create$3 = Object.create;
+var __defProp$3 = Object.defineProperty;
+var __getOwnPropDesc$3 = Object.getOwnPropertyDescriptor;
+var __knownSymbol$3 = (name, symbol) => (symbol = Symbol[name]) ? symbol : Symbol.for("Symbol." + name);
+var __typeError$3 = (msg) => {
   throw TypeError(msg);
 };
-var __defNormalProp$1 = (obj, key, value) => key in obj ? __defProp$1(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __decoratorStart$1 = (base) => [, , , __create$1(base?.[__knownSymbol$1("metadata")] ?? null)];
-var __decoratorStrings$1 = ["class", "method", "getter", "setter", "accessor", "field", "value", "get", "set"];
-var __expectFn$1 = (fn) => fn !== void 0 && typeof fn !== "function" ? __typeError$1("Function expected") : fn;
-var __decoratorContext$1 = (kind, name, done, metadata, fns) => ({ kind: __decoratorStrings$1[kind], name, metadata, addInitializer: (fn) => done._ ? __typeError$1("Already initialized") : fns.push(__expectFn$1(fn || null)) });
-var __decoratorMetadata$1 = (array, target) => __defNormalProp$1(target, __knownSymbol$1("metadata"), array[3]);
-var __runInitializers$1 = (array, flags, self, value) => {
+var __defNormalProp$3 = (obj, key, value) => key in obj ? __defProp$3(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __decoratorStart$3 = (base) => [, , , __create$3(base?.[__knownSymbol$3("metadata")] ?? null)];
+var __decoratorStrings$3 = ["class", "method", "getter", "setter", "accessor", "field", "value", "get", "set"];
+var __expectFn$3 = (fn) => fn !== void 0 && typeof fn !== "function" ? __typeError$3("Function expected") : fn;
+var __decoratorContext$3 = (kind, name, done, metadata, fns) => ({ kind: __decoratorStrings$3[kind], name, metadata, addInitializer: (fn) => done._ ? __typeError$3("Already initialized") : fns.push(__expectFn$3(fn || null)) });
+var __decoratorMetadata$3 = (array, target) => __defNormalProp$3(target, __knownSymbol$3("metadata"), array[3]);
+var __runInitializers$3 = (array, flags, self, value) => {
   for (var i = 0, fns = array[flags >> 1], n = fns && fns.length; i < n; i++) fns[i].call(self) ;
   return value;
 };
-var __decorateElement$1 = (array, flags, name, decorators, target, extra) => {
+var __decorateElement$3 = (array, flags, name, decorators, target, extra) => {
   var it, done, ctx, access, k = flags & 7, s = false, p = false;
-  var j = 2 , key = __decoratorStrings$1[k + 5];
+  var j = 2 , key = __decoratorStrings$3[k + 5];
   var extraInitializers = array[j] || (array[j] = []);
-  var desc = ((target = target.prototype), __getOwnPropDesc$1(target , name));
+  var desc = ((target = target.prototype), __getOwnPropDesc$3(target , name));
   for (var i = decorators.length - 1; i >= 0; i--) {
-    ctx = __decoratorContext$1(k, name, done = {}, array[3], extraInitializers);
+    ctx = __decoratorContext$3(k, name, done = {}, array[3], extraInitializers);
     {
       ctx.static = s, ctx.private = p, access = ctx.access = { has: (x) => name in x };
       access.get = (x) => x[name];
     }
     it = (0, decorators[i])(desc[key]  , ctx), done._ = 1;
-    __expectFn$1(it) && (desc[key] = it );
+    __expectFn$3(it) && (desc[key] = it );
   }
-  return desc && __defProp$1(target, name, desc), target;
+  return desc && __defProp$3(target, name, desc), target;
 };
-var __publicField$1 = (obj, key, value) => __defNormalProp$1(obj, typeof key !== "symbol" ? key + "" : key, value);
-var _getPageSummary_dec, _search_dec, _a$1, _init$1;
+var __publicField$3 = (obj, key, value) => __defNormalProp$3(obj, typeof key !== "symbol" ? key + "" : key, value);
+var _getPageSummary_dec, _search_dec, _a$3, _init$3;
 var wikipedia;
 ((wikipedia2) => {
   wikipedia2.throttle = pThrottle({
@@ -3287,7 +3325,7 @@ const WikipediaSummarySchema = z.object({
   normalizedtitle: z.string().optional(),
   coordinates: z.object({ lat: z.number(), lon: z.number() }).optional()
 }).describe("Schema for Wikipedia page summary based on MediaWiki REST API");
-class WikipediaClient extends (_a$1 = AIFunctionsProvider, _search_dec = [aiFunction({
+class WikipediaClient extends (_a$3 = AIFunctionsProvider, _search_dec = [aiFunction({
   name: "wikipedia_search",
   description: "Searches Wikipedia for pages matching the given query.",
   inputSchema: z.object({
@@ -3300,7 +3338,7 @@ class WikipediaClient extends (_a$1 = AIFunctionsProvider, _search_dec = [aiFunc
     title: z.string().describe("Wikipedia page title"),
     acceptLanguage: z.string().optional().default("en-us").describe("Locale code for the language to use.")
   })
-})], _a$1) {
+})], _a$3) {
   constructor({
     apiBaseUrl = getEnv("WIKIPEDIA_API_BASE_URL") ?? "https://en.wikipedia.org/api/rest_v1",
     apiUserAgent = getEnv("WIKIPEDIA_API_USER_AGENT") ?? "Agentic (https://github.com/transitive-bullshit/agentic)",
@@ -3310,10 +3348,10 @@ class WikipediaClient extends (_a$1 = AIFunctionsProvider, _search_dec = [aiFunc
     assert(apiBaseUrl, 'WikipediaClient missing required "apiBaseUrl"');
     assert(apiUserAgent, 'WikipediaClient missing required "apiUserAgent"');
     super();
-    __runInitializers$1(_init$1, 5, this);
-    __publicField$1(this, "ky");
-    __publicField$1(this, "apiBaseUrl");
-    __publicField$1(this, "apiUserAgent");
+    __runInitializers$3(_init$3, 5, this);
+    __publicField$3(this, "ky");
+    __publicField$3(this, "apiBaseUrl");
+    __publicField$3(this, "apiUserAgent");
     this.apiBaseUrl = apiBaseUrl;
     this.apiUserAgent = apiUserAgent;
     const throttledKy = throttle ? throttleKy(ky, wikipedia.throttle) : ky;
@@ -3347,10 +3385,10 @@ class WikipediaClient extends (_a$1 = AIFunctionsProvider, _search_dec = [aiFunc
     }).json();
   }
 }
-_init$1 = __decoratorStart$1(_a$1);
-__decorateElement$1(_init$1, 1, "search", _search_dec, WikipediaClient);
-__decorateElement$1(_init$1, 1, "getPageSummary", _getPageSummary_dec, WikipediaClient);
-__decoratorMetadata$1(_init$1, WikipediaClient);
+_init$3 = __decoratorStart$3(_a$3);
+__decorateElement$3(_init$3, 1, "search", _search_dec, WikipediaClient);
+__decorateElement$3(_init$3, 1, "getPageSummary", _getPageSummary_dec, WikipediaClient);
+__decoratorMetadata$3(_init$3, WikipediaClient);
 function createWikipediaClient(config = {}) {
   return new WikipediaClient(config);
 }
@@ -3871,41 +3909,41 @@ const graphRagQueryTool = createTool({
   }
 });
 
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __knownSymbol = (name, symbol) => (symbol = Symbol[name]) ? symbol : Symbol.for("Symbol." + name);
-var __typeError = (msg) => {
+var __create$2 = Object.create;
+var __defProp$2 = Object.defineProperty;
+var __getOwnPropDesc$2 = Object.getOwnPropertyDescriptor;
+var __knownSymbol$2 = (name, symbol) => (symbol = Symbol[name]) ? symbol : Symbol.for("Symbol." + name);
+var __typeError$2 = (msg) => {
   throw TypeError(msg);
 };
-var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __decoratorStart = (base) => [, , , __create(base?.[__knownSymbol("metadata")] ?? null)];
-var __decoratorStrings = ["class", "method", "getter", "setter", "accessor", "field", "value", "get", "set"];
-var __expectFn = (fn) => fn !== void 0 && typeof fn !== "function" ? __typeError("Function expected") : fn;
-var __decoratorContext = (kind, name, done, metadata, fns) => ({ kind: __decoratorStrings[kind], name, metadata, addInitializer: (fn) => done._ ? __typeError("Already initialized") : fns.push(__expectFn(fn || null)) });
-var __decoratorMetadata = (array, target) => __defNormalProp(target, __knownSymbol("metadata"), array[3]);
-var __runInitializers = (array, flags, self, value) => {
+var __defNormalProp$2 = (obj, key, value) => key in obj ? __defProp$2(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __decoratorStart$2 = (base) => [, , , __create$2(base?.[__knownSymbol$2("metadata")] ?? null)];
+var __decoratorStrings$2 = ["class", "method", "getter", "setter", "accessor", "field", "value", "get", "set"];
+var __expectFn$2 = (fn) => fn !== void 0 && typeof fn !== "function" ? __typeError$2("Function expected") : fn;
+var __decoratorContext$2 = (kind, name, done, metadata, fns) => ({ kind: __decoratorStrings$2[kind], name, metadata, addInitializer: (fn) => done._ ? __typeError$2("Already initialized") : fns.push(__expectFn$2(fn || null)) });
+var __decoratorMetadata$2 = (array, target) => __defNormalProp$2(target, __knownSymbol$2("metadata"), array[3]);
+var __runInitializers$2 = (array, flags, self, value) => {
   for (var i = 0, fns = array[flags >> 1], n = fns && fns.length; i < n; i++) fns[i].call(self) ;
   return value;
 };
-var __decorateElement = (array, flags, name, decorators, target, extra) => {
+var __decorateElement$2 = (array, flags, name, decorators, target, extra) => {
   var it, done, ctx, access, k = flags & 7, s = false, p = false;
-  var j = 2 , key = __decoratorStrings[k + 5];
+  var j = 2 , key = __decoratorStrings$2[k + 5];
   var extraInitializers = array[j] || (array[j] = []);
-  var desc = ((target = target.prototype), __getOwnPropDesc(target , name));
+  var desc = ((target = target.prototype), __getOwnPropDesc$2(target , name));
   for (var i = decorators.length - 1; i >= 0; i--) {
-    ctx = __decoratorContext(k, name, done = {}, array[3], extraInitializers);
+    ctx = __decoratorContext$2(k, name, done = {}, array[3], extraInitializers);
     {
       ctx.static = s, ctx.private = p, access = ctx.access = { has: (x) => name in x };
       access.get = (x) => x[name];
     }
     it = (0, decorators[i])(desc[key]  , ctx), done._ = 1;
-    __expectFn(it) && (desc[key] = it );
+    __expectFn$2(it) && (desc[key] = it );
   }
-  return desc && __defProp(target, name, desc), target;
+  return desc && __defProp$2(target, name, desc), target;
 };
-var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
-var _searchCode_dec, _listRepoReleases_dec, _listRepoCommits_dec, _listRepoBranches_dec, _listRepoPulls_dec, _listRepoIssues_dec, _getRepo_dec, _listUserRepos_dec, _searchRepositories_dec, _getUserByUsername_dec, _a, _init;
+var __publicField$2 = (obj, key, value) => __defNormalProp$2(obj, typeof key !== "symbol" ? key + "" : key, value);
+var _searchCode_dec, _listRepoReleases_dec, _listRepoCommits_dec, _listRepoBranches_dec, _listRepoPulls_dec, _listRepoIssues_dec, _getRepo_dec, _listUserRepos_dec, _searchRepositories_dec, _getUserByUsername_dec, _a$2, _init$2;
 const GitHubUserSchema = z.object({
   login: z.string(),
   id: z.number().int(),
@@ -4042,7 +4080,7 @@ const GitHubCodeSearchItemSchema = z.object({
 const GitHubCodeSearchResultsSchema = z.object({
   items: z.array(GitHubCodeSearchItemSchema)
 });
-class GitHubClient extends (_a = AIFunctionsProvider, _getUserByUsername_dec = [aiFunction({
+class GitHubClient extends (_a$2 = AIFunctionsProvider, _getUserByUsername_dec = [aiFunction({
   name: "github_get_user_by_username",
   description: "Get a user by username.",
   inputSchema: z.object({
@@ -4119,7 +4157,7 @@ class GitHubClient extends (_a = AIFunctionsProvider, _getUserByUsername_dec = [
     q: z.string().describe("Search query (e.g. 'repo:owner/repo filename:main.js')"),
     per_page: z.number().int().optional().default(10)
   })
-})], _a) {
+})], _a$2) {
   constructor({
     apiKey = getEnv("GITHUB_API_KEY")
   } = {}) {
@@ -4128,9 +4166,9 @@ class GitHubClient extends (_a = AIFunctionsProvider, _getUserByUsername_dec = [
       'GitHubClient missing required "apiKey" (defaults to "GITHUB_API_KEY")'
     );
     super();
-    __runInitializers(_init, 5, this);
-    __publicField(this, "apiKey");
-    __publicField(this, "octokit");
+    __runInitializers$2(_init$2, 5, this);
+    __publicField$2(this, "apiKey");
+    __publicField$2(this, "octokit");
     this.apiKey = apiKey;
     this.octokit = new Octokit({ auth: apiKey });
   }
@@ -4180,18 +4218,18 @@ class GitHubClient extends (_a = AIFunctionsProvider, _getUserByUsername_dec = [
     return { items: res.data.items };
   }
 }
-_init = __decoratorStart(_a);
-__decorateElement(_init, 1, "getUserByUsername", _getUserByUsername_dec, GitHubClient);
-__decorateElement(_init, 1, "searchRepositories", _searchRepositories_dec, GitHubClient);
-__decorateElement(_init, 1, "listUserRepos", _listUserRepos_dec, GitHubClient);
-__decorateElement(_init, 1, "getRepo", _getRepo_dec, GitHubClient);
-__decorateElement(_init, 1, "listRepoIssues", _listRepoIssues_dec, GitHubClient);
-__decorateElement(_init, 1, "listRepoPulls", _listRepoPulls_dec, GitHubClient);
-__decorateElement(_init, 1, "listRepoBranches", _listRepoBranches_dec, GitHubClient);
-__decorateElement(_init, 1, "listRepoCommits", _listRepoCommits_dec, GitHubClient);
-__decorateElement(_init, 1, "listRepoReleases", _listRepoReleases_dec, GitHubClient);
-__decorateElement(_init, 1, "searchCode", _searchCode_dec, GitHubClient);
-__decoratorMetadata(_init, GitHubClient);
+_init$2 = __decoratorStart$2(_a$2);
+__decorateElement$2(_init$2, 1, "getUserByUsername", _getUserByUsername_dec, GitHubClient);
+__decorateElement$2(_init$2, 1, "searchRepositories", _searchRepositories_dec, GitHubClient);
+__decorateElement$2(_init$2, 1, "listUserRepos", _listUserRepos_dec, GitHubClient);
+__decorateElement$2(_init$2, 1, "getRepo", _getRepo_dec, GitHubClient);
+__decorateElement$2(_init$2, 1, "listRepoIssues", _listRepoIssues_dec, GitHubClient);
+__decorateElement$2(_init$2, 1, "listRepoPulls", _listRepoPulls_dec, GitHubClient);
+__decorateElement$2(_init$2, 1, "listRepoBranches", _listRepoBranches_dec, GitHubClient);
+__decorateElement$2(_init$2, 1, "listRepoCommits", _listRepoCommits_dec, GitHubClient);
+__decorateElement$2(_init$2, 1, "listRepoReleases", _listRepoReleases_dec, GitHubClient);
+__decorateElement$2(_init$2, 1, "searchCode", _searchCode_dec, GitHubClient);
+__decoratorMetadata$2(_init$2, GitHubClient);
 function createGitHubClient(config = {}) {
   return new GitHubClient(config);
 }
@@ -5027,6 +5065,196 @@ const tracingTools = [
   initOpenTelemetryTool
 ];
 
+var __create$1 = Object.create;
+var __defProp$1 = Object.defineProperty;
+var __getOwnPropDesc$1 = Object.getOwnPropertyDescriptor;
+var __knownSymbol$1 = (name, symbol) => (symbol = Symbol[name]) ? symbol : Symbol.for("Symbol." + name);
+var __typeError$1 = (msg) => {
+  throw TypeError(msg);
+};
+var __defNormalProp$1 = (obj, key, value) => key in obj ? __defProp$1(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __decoratorStart$1 = (base) => [, , , __create$1(base?.[__knownSymbol$1("metadata")] ?? null)];
+var __decoratorStrings$1 = ["class", "method", "getter", "setter", "accessor", "field", "value", "get", "set"];
+var __expectFn$1 = (fn) => fn !== void 0 && typeof fn !== "function" ? __typeError$1("Function expected") : fn;
+var __decoratorContext$1 = (kind, name, done, metadata, fns) => ({ kind: __decoratorStrings$1[kind], name, metadata, addInitializer: (fn) => done._ ? __typeError$1("Already initialized") : fns.push(__expectFn$1(fn || null)) });
+var __decoratorMetadata$1 = (array, target) => __defNormalProp$1(target, __knownSymbol$1("metadata"), array[3]);
+var __runInitializers$1 = (array, flags, self, value) => {
+  for (var i = 0, fns = array[flags >> 1], n = fns && fns.length; i < n; i++) fns[i].call(self) ;
+  return value;
+};
+var __decorateElement$1 = (array, flags, name, decorators, target, extra) => {
+  var it, done, ctx, access, k = flags & 7, s = false, p = false;
+  var j = 2 , key = __decoratorStrings$1[k + 5];
+  var extraInitializers = array[j] || (array[j] = []);
+  var desc = ((target = target.prototype), __getOwnPropDesc$1(target , name));
+  for (var i = decorators.length - 1; i >= 0; i--) {
+    ctx = __decoratorContext$1(k, name, done = {}, array[3], extraInitializers);
+    {
+      ctx.static = s, ctx.private = p, access = ctx.access = { has: (x) => name in x };
+      access.get = (x) => x[name];
+    }
+    it = (0, decorators[i])(desc[key]  , ctx), done._ = 1;
+    __expectFn$1(it) && (desc[key] = it );
+  }
+  return desc && __defProp$1(target, name, desc), target;
+};
+var __publicField$1 = (obj, key, value) => __defNormalProp$1(obj, key + "" , value);
+var _tickerDetails_dec, _a$1, _init$1;
+const TickerDetailsSchema = z.object({
+  ticker: z.string(),
+  name: z.string(),
+  market: z.string(),
+  locale: z.string(),
+  primary_exchange: z.string().optional(),
+  type: z.string().optional(),
+  active: z.boolean().optional(),
+  currency_name: z.string().optional(),
+  cik: z.string().optional(),
+  composite_figi: z.string().optional(),
+  share_class_figi: z.string().optional(),
+  last_updated_utc: z.string().optional()
+  // Add more fields as needed based on Polygon API response
+}).partial();
+class MastraPolygonClient extends (_a$1 = AIFunctionsProvider, _tickerDetails_dec = [aiFunction({
+  name: "tickerDetails",
+  description: "Get details for a given stock ticker symbol using Polygon.io.",
+  inputSchema: z.object({
+    ticker: z.string().describe("The stock ticker symbol (e.g., AAPL, MSFT)")
+  })
+})], _a$1) {
+  /**
+   * @param apiKey Polygon.io API key (required)
+   */
+  constructor({ apiKey }) {
+    super();
+    __runInitializers$1(_init$1, 5, this);
+    __publicField$1(this, "client");
+    if (!apiKey) throw new Error("Polygon API key is required");
+    this.client = new PolygonClient({ apiKey });
+  }
+  async tickerDetails({ ticker }) {
+    try {
+      const details = await this.client.tickerDetails({ ticker });
+      return details;
+    } catch (error) {
+      return {
+        error: true,
+        message: error?.message || "Unknown error fetching ticker details."
+      };
+    }
+  }
+}
+_init$1 = __decoratorStart$1(_a$1);
+__decorateElement$1(_init$1, 1, "tickerDetails", _tickerDetails_dec, MastraPolygonClient);
+__decoratorMetadata$1(_init$1, MastraPolygonClient);
+function createMastraPolygonTools(config = {}) {
+  const apiKey = config.apiKey ?? getEnv("POLYGON_API_KEY");
+  if (!apiKey) throw new Error("POLYGON_API_KEY is required in env or config");
+  const polygonClient = new MastraPolygonClient({ apiKey });
+  const mastraTools = createMastraTools(polygonClient);
+  if (mastraTools.tickerDetails) {
+    mastraTools.tickerDetails.outputSchema = TickerDetailsSchema;
+  }
+  return mastraTools;
+}
+
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __knownSymbol = (name, symbol) => (symbol = Symbol[name]) ? symbol : Symbol.for("Symbol." + name);
+var __typeError = (msg) => {
+  throw TypeError(msg);
+};
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __decoratorStart = (base) => [, , , __create(base?.[__knownSymbol("metadata")] ?? null)];
+var __decoratorStrings = ["class", "method", "getter", "setter", "accessor", "field", "value", "get", "set"];
+var __expectFn = (fn) => fn !== void 0 && typeof fn !== "function" ? __typeError("Function expected") : fn;
+var __decoratorContext = (kind, name, done, metadata, fns) => ({ kind: __decoratorStrings[kind], name, metadata, addInitializer: (fn) => done._ ? __typeError("Already initialized") : fns.push(__expectFn(fn || null)) });
+var __decoratorMetadata = (array, target) => __defNormalProp(target, __knownSymbol("metadata"), array[3]);
+var __runInitializers = (array, flags, self, value) => {
+  for (var i = 0, fns = array[flags >> 1], n = fns && fns.length; i < n; i++) fns[i].call(self) ;
+  return value;
+};
+var __decorateElement = (array, flags, name, decorators, target, extra) => {
+  var it, done, ctx, access, k = flags & 7, s = false, p = false;
+  var j = 2 , key = __decoratorStrings[k + 5];
+  var extraInitializers = array[j] || (array[j] = []);
+  var desc = ((target = target.prototype), __getOwnPropDesc(target , name));
+  for (var i = decorators.length - 1; i >= 0; i--) {
+    ctx = __decoratorContext(k, name, done = {}, array[3], extraInitializers);
+    {
+      ctx.static = s, ctx.private = p, access = ctx.access = { has: (x) => name in x };
+      access.get = (x) => x[name];
+    }
+    it = (0, decorators[i])(desc[key]  , ctx), done._ = 1;
+    __expectFn(it) && (desc[key] = it );
+  }
+  return desc && __defProp(target, name, desc), target;
+};
+var __publicField = (obj, key, value) => __defNormalProp(obj, key + "" , value);
+var _getSubredditPosts_dec, _a, _init;
+const SubredditPostSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  author: z.string(),
+  score: z.number(),
+  url: z.string().optional(),
+  permalink: z.string().optional(),
+  selftext: z.string().optional(),
+  subreddit: z.string().optional(),
+  created_utc: z.number().optional(),
+  num_comments: z.number().optional(),
+  flair: z.string().optional(),
+  media: z.any().optional(),
+  stickied: z.boolean().optional(),
+  over_18: z.boolean().optional()
+  // Add more fields as needed
+});
+const SubredditPostsSchema = z.array(SubredditPostSchema);
+const getSubredditPostsInputSchema = z.object({
+  subreddit: z.string(),
+  type: z.enum(["hot", "new", "top", "rising"]).default("hot"),
+  limit: z.number().int().min(1).max(100).default(10)
+});
+class MastraRedditClient extends (_a = AIFunctionsProvider, _getSubredditPosts_dec = [aiFunction({
+  name: "getSubredditPosts",
+  description: "Fetch posts from a subreddit (hot, new, top, or rising).",
+  inputSchema: getSubredditPostsInputSchema
+})], _a) {
+  constructor() {
+    super();
+    __runInitializers(_init, 5, this);
+    __publicField(this, "client");
+    this.client = new RedditClient();
+  }
+  async getSubredditPosts({
+    subreddit,
+    type,
+    limit
+  }) {
+    try {
+      const posts = await this.client.getSubredditPosts({ subreddit, type, limit });
+      return posts;
+    } catch (error) {
+      return {
+        error: true,
+        message: error?.message || "Unknown error fetching subreddit posts."
+      };
+    }
+  }
+}
+_init = __decoratorStart(_a);
+__decorateElement(_init, 1, "getSubredditPosts", _getSubredditPosts_dec, MastraRedditClient);
+__decoratorMetadata(_init, MastraRedditClient);
+function createMastraRedditTools() {
+  const redditClient = new MastraRedditClient();
+  const mastraTools = createMastraTools(redditClient);
+  if (mastraTools.getSubredditPosts) {
+    mastraTools.getSubredditPosts.outputSchema = SubredditPostsSchema;
+  }
+  return mastraTools;
+}
+
 const math = create(all);
 const calculatorTool = createTool({
   id: "calculator",
@@ -5486,7 +5714,9 @@ const envSchema = z.object({
   TAVILY_API_KEY: z.string().optional(),
   // API keys for extra tools
   E2B_API_KEY: z.string().min(1, "E2B API key is required"),
-  GITHUB_API_KEY: z.string().min(1, "GitHub API key is required")
+  GITHUB_API_KEY: z.string().min(1, "GitHub API key is required"),
+  POLYGON_API_KEY: z.string().min(1, "Polygon API key is required")
+  // <-- Added for Polygon
 });
 function validateConfig() {
   try {
@@ -5709,6 +5939,28 @@ try {
   });
 }
 try {
+  const polygonToolsObject = createMastraPolygonTools({
+    apiKey: config.POLYGON_API_KEY
+  });
+  const polygonToolsArray = Object.values(polygonToolsObject);
+  extraTools.push(...polygonToolsArray.map((tool) => tool));
+  logger.info(`Added ${polygonToolsArray.length} Polygon tools.`);
+} catch (error) {
+  logger.error("Failed to initialize Polygon tools:", {
+    error
+  });
+}
+try {
+  const redditToolsObject = createMastraRedditTools();
+  const redditToolsArray = Object.values(redditToolsObject);
+  extraTools.push(...redditToolsArray.map((tool) => tool));
+  logger.info(`Added ${redditToolsArray.length} Reddit tools.`);
+} catch (error) {
+  logger.error("Failed to initialize Reddit tools:", {
+    error
+  });
+}
+try {
   const githubToolsObject = createMastraGitHubTools();
   const githubToolsArray = Object.values(githubToolsObject);
   extraTools.push(...githubToolsArray.map((tool) => tool));
@@ -5744,4 +5996,4 @@ logger.info(`E2B tools included: ${extraTools.some((t) => t.id.startsWith("e2b_"
 logger.info(`Arxiv tools included: ${extraTools.some((t) => t.id.startsWith("arxiv_"))}`);
 logger.info(`AI SDK tools included: ${extraTools.some((t) => t.id.startsWith("ai-sdk_"))}`);
 
-export { AiSdkPromptOutputSchema, ArXivClient, ArxivSearchEntrySchema, ArxivSearchOutputSchema, E2BOutputSchema, createExaSearchProvider as ExaSearchOutputSchema, ExaSearchProvider, FeedbackType, FileEncoding, FileWriteMode, GitHubBranchSchema, GitHubBranchesListSchema, GitHubClient, GitHubCodeSearchItemSchema, GitHubCodeSearchResultsSchema, GitHubCommitSchema, GitHubCommitsListSchema, GitHubIssueSchema, GitHubIssuesListSchema, GitHubPullSchema, GitHubPullsListSchema, GitHubReleaseSchema, GitHubReleasesListSchema, GitHubRepoSchema, GitHubReposListSchema, GitHubUserSchema, LLMChainOutputSchema, RewardType, WikipediaClient, WikipediaPageResultSchema, WikipediaSearchSchema, WikipediaSummarySchema, WikipediaThumbnailSchema, aiSdkPromptTool, allTools, allToolsMap, analyzeContentTool, analyzeFeedbackTool, applyRLInsightsTool, arxiv, calculateRewardTool, calculatorTool as calculator, collectFeedbackTool, createAISDKTools, createAISpan, createArxivClient, createBraveSearchTool, createE2BSandboxTool, createExaSearchProvider, createFileTool, createGitHubClient, createGoogleSearchTool, createGraphRagTool, createHttpSpan, createLlamaIndexTools, createMastraAISDKTools, createMastraArxivTools, createMastraE2BTools, createMastraExaSearchTools, createMastraGitHubTools, createMastraLLMChainTools, createMastraLlamaIndexTools, createMastraVectorQueryTool, createMastraWikipediaTools, createTavilySearchTool, createWikipediaClient, csvReaderTool, allToolsMap as default, defineRewardFunctionTool, deleteFileTool, docxReaderTool, e2b, editFileTool, embedDocumentTool, extractHtmlTextTool, filteredQueryTool, formatContentTool, getMainBranchRef, getOpenTelemetrySdk, getTracer, getUnreadFeedbackThreads, googleVectorQueryTool, graphRagQueryTool, toolGroups as groups, initOpenTelemetry, initOpenTelemetryTool, initSigNoz, initializeDefaultTracing, jsonReaderTool, listFilesTool, llmChainTool, optimizePolicyTool, readFileTool, readKnowledgeFileTool, recordLlmMetrics, recordLlmMetricsTool, recordMetrics, searchDocumentsTool, shutdownSigNoz, shutdownTracingTool, startAISpanTool, toolGroups, allToolsMap as toolMap, tracingTools, vectorQueryTool, wikipedia, writeKnowledgeFileTool, writeToFileTool };
+export { AiSdkPromptOutputSchema, ArXivClient, ArxivDownloadPdfOutputSchema, ArxivPdfUrlOutputSchema, ArxivSearchEntrySchema, ArxivSearchOutputSchema, E2BOutputSchema, createExaSearchProvider as ExaSearchOutputSchema, ExaSearchProvider, FeedbackType, FileEncoding, FileWriteMode, GitHubBranchSchema, GitHubBranchesListSchema, GitHubClient, GitHubCodeSearchItemSchema, GitHubCodeSearchResultsSchema, GitHubCommitSchema, GitHubCommitsListSchema, GitHubIssueSchema, GitHubIssuesListSchema, GitHubPullSchema, GitHubPullsListSchema, GitHubReleaseSchema, GitHubReleasesListSchema, GitHubRepoSchema, GitHubReposListSchema, GitHubUserSchema, LLMChainOutputSchema, MastraPolygonClient, MastraRedditClient, RewardType, SubredditPostSchema, SubredditPostsSchema, TickerDetailsSchema, WikipediaClient, WikipediaPageResultSchema, WikipediaSearchSchema, WikipediaSummarySchema, WikipediaThumbnailSchema, aiSdkPromptTool, allTools, allToolsMap, analyzeContentTool, analyzeFeedbackTool, applyRLInsightsTool, arxiv, calculateRewardTool, calculatorTool as calculator, collectFeedbackTool, createAISDKTools, createAISpan, createArxivClient, createBraveSearchTool, createE2BSandboxTool, createExaSearchProvider, createFileTool, createGitHubClient, createGoogleSearchTool, createGraphRagTool, createHttpSpan, createLlamaIndexTools, createMastraAISDKTools, createMastraArxivTools, createMastraE2BTools, createMastraExaSearchTools, createMastraGitHubTools, createMastraLLMChainTools, createMastraLlamaIndexTools, createMastraPolygonTools, createMastraRedditTools, createMastraVectorQueryTool, createMastraWikipediaTools, createTavilySearchTool, createWikipediaClient, csvReaderTool, allToolsMap as default, defineRewardFunctionTool, deleteFileTool, docxReaderTool, e2b, editFileTool, embedDocumentTool, extractHtmlTextTool, filteredQueryTool, formatContentTool, getMainBranchRef, getOpenTelemetrySdk, getTracer, getUnreadFeedbackThreads, googleVectorQueryTool, graphRagQueryTool, toolGroups as groups, initOpenTelemetry, initOpenTelemetryTool, initSigNoz, initializeDefaultTracing, jsonReaderTool, listFilesTool, llmChainTool, optimizePolicyTool, readFileTool, readKnowledgeFileTool, recordLlmMetrics, recordLlmMetricsTool, recordMetrics, searchDocumentsTool, shutdownSigNoz, shutdownTracingTool, startAISpanTool, toolGroups, allToolsMap as toolMap, tracingTools, vectorQueryTool, wikipedia, writeKnowledgeFileTool, writeToFileTool };

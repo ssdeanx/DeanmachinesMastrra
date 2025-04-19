@@ -7,6 +7,8 @@ import {
 import { XMLParser } from "fast-xml-parser";
 import defaultKy, { type KyInstance } from "ky";
 import { z } from "zod";
+import fs from "fs-extra";
+import path from "path";
 
 import { castArray, getProp } from "./utils";
 import { createMastraTools } from "@agentic/mastra";
@@ -241,6 +243,40 @@ export class ArXivClient extends AIFunctionsProvider {
       ),
     };
   }
+
+  /**
+   * Get the direct PDF URL for a given arXiv ID.
+   */
+  @aiFunction({
+    name: "arxiv_pdf_url",
+    description: "Get the direct PDF URL for a given arXiv ID.",
+    inputSchema: z.object({ id: z.string().describe("arXiv identifier, e.g. 2101.00001") }),
+  })
+  async arxivPdfUrl({ id }: { id: string }) {
+    return { url: `https://arxiv.org/pdf/${id}.pdf` };
+  }
+
+  /**
+   * Download the PDF for a given arXiv ID and save it to disk.
+   * @param id arXiv identifier (e.g. 2101.00001)
+   * @param filePath Local file path to save the PDF
+   */
+  @aiFunction({
+    name: "arxiv_download_pdf",
+    description: "Download the PDF for a given arXiv ID and save it to disk.",
+    inputSchema: z.object({
+      id: z.string().describe("arXiv identifier, e.g. 2101.00001"),
+      filePath: z.string().describe("Local file path to save the PDF"),
+    }),
+  })
+  async arxiv_download_pdf({ id, filePath }: { id: string; filePath: string; }) {
+    const url = `https://arxiv.org/pdf/${id}.pdf`;
+    const response = await this.ky.get(url);
+    const buffer = await response.arrayBuffer();
+    await fs.ensureDir(path.dirname(filePath));
+    await fs.writeFile(filePath, Buffer.from(buffer));
+    return { filePath };
+  }
 }
 
 // --- Explicit output schema for arxiv_search tool ---
@@ -268,6 +304,16 @@ export const ArxivSearchOutputSchema = z.object({
   startIndex: z.number(),
   itemsPerPage: z.number(),
   entries: z.array(ArxivSearchEntrySchema),
+});
+
+// --- Output schema for PDF tool ---
+export const ArxivPdfUrlOutputSchema = z.object({
+  url: z.string().url(),
+});
+
+// --- Output schema for download tool ---
+export const ArxivDownloadPdfOutputSchema = z.object({
+  filePath: z.string(),
 });
 
 /**
@@ -300,6 +346,12 @@ export function createMastraArxivTools(config: {
   const mastraTools = createMastraTools(arxivClient);
   if (mastraTools.arxiv_search) {
     (mastraTools.arxiv_search as any).outputSchema = ArxivSearchOutputSchema;
+  }
+  if (mastraTools.arxiv_pdf_url) {
+    (mastraTools.arxiv_pdf_url as any).outputSchema = ArxivPdfUrlOutputSchema;
+  }
+  if (mastraTools.arxiv_download_pdf) {
+    (mastraTools.arxiv_download_pdf as any).outputSchema = ArxivDownloadPdfOutputSchema;
   }
   return mastraTools;
 }

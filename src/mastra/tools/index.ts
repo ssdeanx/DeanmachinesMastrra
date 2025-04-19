@@ -81,6 +81,8 @@ import {
   biasEvalTool
 } from "./evals";
 import { tracingTools } from "./tracingTools";
+import { createMastraPolygonTools, TickerDetailsSchema } from "./polygon"; // Import Mastra helper for Polygon tools
+import { createMastraRedditTools, SubredditPostSchema } from "./reddit"; // Import Mastra helper for Reddit tools
 
 // === Export all tool modules (Consider if all are needed) ===
 export * from "./e2b";
@@ -105,8 +107,12 @@ export * from "./tavily";
 export * from "./tracingTools";
 export { ExaSearchOutputSchema };
 export { GitHubUserSchema };
+export { TickerDetailsSchema };
+export { SubredditPostSchema };
 export * from "../services/signoz";
 export * from "../services/tracing";
+export * from "./polygon";
+export * from "./reddit";
 
 // === Configure Logger ===
 const logger = createLogger({ name: "tool-initialization", level: "info" });
@@ -128,6 +134,7 @@ const envSchema = z.object({
   // API keys for extra tools
   E2B_API_KEY: z.string().min(1, "E2B API key is required"),
   GITHUB_API_KEY: z.string().min(1, "GitHub API key is required"),
+  POLYGON_API_KEY: z.string().min(1, "Polygon API key is required"), // <-- Added for Polygon
 });
 
 /**
@@ -453,6 +460,26 @@ try {
     }
 } catch (error) {
     logger.error("Failed to initialize GraphRag tools:", { error });
+}
+
+// --- Polygon Tools (using Mastra helper) ---
+try {
+    const polygonToolsObject = createMastraPolygonTools({ apiKey: config.POLYGON_API_KEY });
+    const polygonToolsArray = Object.values(polygonToolsObject);
+    extraTools.push(...polygonToolsArray.map(tool => tool as Tool<any, any>));
+    logger.info(`Added ${polygonToolsArray.length} Polygon tools.`);
+} catch (error) {
+    logger.error("Failed to initialize Polygon tools:", { error });
+}
+
+// --- Reddit Tools (using Mastra helper) ---
+try {
+    const redditToolsObject = createMastraRedditTools();
+    const redditToolsArray = Object.values(redditToolsObject);
+    extraTools.push(...redditToolsArray.map(tool => tool as Tool<any, any>));
+    logger.info(`Added ${redditToolsArray.length} Reddit tools.`);
+} catch (error) {
+    logger.error("Failed to initialize Reddit tools:", { error });
 }
 
 // --- LLM Chain Tools (using Mastra helper) ---

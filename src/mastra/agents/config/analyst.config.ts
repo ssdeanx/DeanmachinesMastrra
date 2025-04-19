@@ -155,6 +155,10 @@ export const analystAgentConfig: BaseAgentConfig = {
     "wikipedia_get_page_summary",
     "context-precision-eval",
     "embed-document",
+    "getSubredditPosts",
+    "tickerDetails",
+    "arxiv_pdf_url",
+    "arxiv_download_pdf",
   ],
 };
 
