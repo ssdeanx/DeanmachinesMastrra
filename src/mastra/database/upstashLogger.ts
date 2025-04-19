@@ -39,6 +39,12 @@ function createLogger({ name, transports, level }: { name: string; transports: {
         // You can add more log levels (warn, error, etc.) as needed
     };
 }
-
+// Export the logger instance for external use
+// This allows you to use the logger directly if needed
 export const upstashLogger = logger;
+// Export the logger instance for external use
+// This allows you to use the logger directly if needed
 export default upstashLogger;
+// Export the UpstashTransport for external use
+// This allows you to use the UpstashTransport directly if needed
+export { UpstashTransport };

@@ -50,6 +50,12 @@ function createLogger({ name, transports, level }: { name: string; transports: {
         // You can add more log levels (info, error, etc.) as needed
     };
 }
-
+// Export the logger instance for external use
+// This allows you to use the logger directly if needed
 export const fileLoggerInstance = fileLogger;
+
+// Export the logger instance for external use
 export default fileLoggerInstance;
+// Export the FileTransport for external use
+// This allows you to use the FileTransport directly if needed
+export { FileTransport };
