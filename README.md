@@ -18,6 +18,7 @@ Welcome to the **DeanMachines Mastra AI Workspace**! This monorepo contains the 
   - [Tooling System](#tooling-system)
   - [Memory \& Database](#memory--database)
   - [Observability \& Tracing](#observability--tracing)
+  - [Voice \& Speech Integration](#voice--speech-integration)
   - [Model Providers](#model-providers)
   - [Eval \& RL Pipeline](#eval--rl-pipeline)
   - [Vertex AI \& LLM Integration Details](#vertex-ai--llm-integration-details)
@@ -346,10 +347,50 @@ Tools are modular, reusable functions that agents can invoke. They are defined i
 
 ## Observability & Tracing
 
-- **SigNoz** and **OpenTelemetry** are integrated for distributed tracing and metrics (see `services/signoz.ts` and `services/tracing.ts`).
+- **SigNoz** and **OpenTelemetry** are integrated for
+  distributed tracing and metrics (see `services/signoz.ts` and
+  `services/tracing.ts`).
 - All tools and agents create spans for major operations.
-- Latency, token usage, and error status are recorded for all LLM and tool calls.
-- Tracing hooks are injected into agent lifecycle (see `base.agent.ts`).
+- Latency, token usage, and error status are recorded for all
+  LLM and tool calls.
+- **Base Agent** (`base.agent.ts`) now:
+  - Calls `initializeDefaultTracing()` at startup to auto‐instrument.
+  - Invokes `initSigNoz()` to set up an OTLP exporter, tracer, and meter.
+  - Creates named spans around agent lifecycle events
+    (`agent.create`, `agent.debug/info/warn/error`).
+  - Records two custom metrics:
+    - `agent.creation.count`
+    - `agent.creation.latency_ms`
+- **Logging Transports** in `base.agent.ts`:
+  - `consoleLogger` (in‐process, timestamped console output)
+  - `fileLogger` (JSON‑line file output; auto‑creates `./logs/mastra.log`)
+  - `upstashLogger` (pushes logs to Upstash Redis via `UpstashTransport`)
+  - These three are wired into a unified `logger` API so every call
+    writes to all channels.
+
+## Voice & Speech Integration
+
+- The `voice/` folder contains two factories:
+  - `createGoogleVoice()` (CompositeVoice + Google TTS/STT + tool injection)
+  - `createElevenLabsVoice()` (ElevenLabs TTS + tool injection)
+- **Voice stub in Base Agent** (`base.agent.ts`):
+  - The import and instantiation of `createGoogleVoice()` are present
+    but commented out.
+  - Event hooks (`voice.connect()`, `voice.on("listen")`, `voice.on("speaker")`)
+    are scaffolded to demonstrate how real‐time STT/TTS would be wired.
+  - Voice support is **half‑complete**; to enable:
+    1. Un‑comment the `voice` import and constructor lines.
+    2. Implement or enable a real‑time streaming provider (Google streaming API).
+    3. Wire in a microphone input (e.g. `getMicrophoneStream()`) and playback.
+- All Agents (`new Agent({...})`) can accept a `voice` instance.
+  When enabled, methods such as:
+  - `agent.speak(text)`
+  - `agent.listen(audioStream)`
+  - `agent.getSpeakers(languageCode)`
+  - `agent.send()` / `agent.answer()`
+  - `agent.on(event, handler)` and `agent.off(event, handler)`
+  - `agent.close()`
+  will be available.
 
 ---
 
