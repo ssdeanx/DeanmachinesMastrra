@@ -6592,6 +6592,17 @@ async function createMastraMcpTools(config) {
           "STDIO",
           "TCP:host.docker.internal:8811"
         ]
+      },
+      "@smithery/toolbox": {
+        command: "npx",
+        args: [
+          "-y",
+          "@smithery/cli@latest",
+          "run",
+          "@smithery/toolbox",
+          "--key",
+          "be98d3d0-f628-45e5-a532-cc4ade91164c"
+        ]
       }
     },
     timeout: 3e4

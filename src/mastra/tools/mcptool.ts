@@ -3,7 +3,7 @@ import { Tool } from "@mastra/core/tools";
 
 /**
  * Helper to create Mastra-compatible MCP tools for use with agents.
- * This will connect to the default MCP docs server and a custom socat TCP relay (or your custom config)
+ * This will connect to the default MCP docs server, a custom socat TCP relay, and the Smithery Toolbox server (or your custom config)
  * and expose all available MCP tools as a plain object.
  */
 export async function createMastraMcpTools(config?: {
@@ -23,6 +23,17 @@ export async function createMastraMcpTools(config?: {
           "STDIO", "TCP:host.docker.internal:8811"
         ],
       },
+      "@smithery/toolbox": {
+        command: "npx",
+        args: [
+          "-y",
+          "@smithery/cli@latest",
+          "run",
+          "@smithery/toolbox",
+          "--key",
+          "be98d3d0-f628-45e5-a532-cc4ade91164c"
+        ]
+      }
     },
     timeout: config?.timeout ?? 30000,
   });

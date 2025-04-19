@@ -15,12 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `createMastraMcpTools` helper for robust async MCP tool loading, supporting multiple MCP servers (`mastra`, `sequentialthinking`, and a custom `socat` TCP relay).
   - Ensured only Mastra-native helpers and types are used (no `@agentic/mastra`).
   - Ready for direct use in agent and tool registry initialization.
+  - Added `@smithery/toolbox` MCP server configuration. Smithery Toolbox MCP tools are now auto-discovered and available to agents.
+  - Docker-based socat relay MCP server is now included and confirmed working.
+  - Both Smithery.ai MCP tools and the custom Docker server are connected and operational, as verified by successful tool initialization logs.
+  - Improved error handling and logging for MCP tool initialization.
 
 - **index.ts (tool barrel)**
   - Integrated async MCP tool initialization using `createMastraMcpTools` in the extra tools section.
   - MCP tools are now loaded and available to agents via `allTools`, `allToolsMap`, and `toolGroups`.
   - Added `export * from "./mcptool";` for unified exports.
   - Provided clear comments and error handling for async tool loading.
+  - MCP tools from Smithery.ai and Docker are now included in the unified tool registry and available to all agents.
 
 ### Changed
 
@@ -31,16 +36,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **General**
   - Improved documentation and inline comments for MCP and Polygon tool integration.
   - Clarified async initialization pattern for tool registry to support MCP and other async tools.
+  - Confirmed robust async initialization and registration of all MCP tools, including Smithery Toolbox and Docker relay, with successful connection and tool loading logs.
 
 ### Fixed
 
 - Removed all references to `@agentic/mastra` in MCP tool loading to prevent cross-package errors.
 - Ensured MCP tools are loaded asynchronously and safely, with robust error logging.
 - Confirmed all tools (including MCP, Polygon, Reddit, etc.) are discoverable and usable by agents.
+- Ensured all MCP servers (Smithery Toolbox and Docker) are reachable and tools are loaded without errors.
+- Improved error logging for MCP initialization failures.
 
 ### Notes
 
 - MCP tools now follow the Mastra pattern: async loading, explicit Zod schemas, and unified exports.
+- Smithery.ai MCP tools and Docker-based MCP server are now fully integrated and operational in the Mastra tool registry.
+- Initialization logs confirm all MCP tools are connected and available for agent use.
 - All changes linted and type-checked after edits.
 - Next steps: Continue to document new tool patterns and agent integration in this changelog for future maintainers.
 
@@ -243,7 +253,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - cheerio: For parsing HTML content (from files or web pages).
   - node-fetch: For reliably fetching documents from URLs.
 - Implementation: These packages should be utilized within a new Mastra AI Tool (e.g., readDocumentContent). This tool will inspect the input file path or URL, determine the likely document type (based on extension or potentially content-type for URLs), and invoke the appropriate parsing library to return the extracted text content for further processing by the agent.
--
+- 
 
 ## [v0.0.5] - 2025-04-15
 
