@@ -13,9 +13,10 @@
 import { Mastra } from "@mastra/core";
 import { createLogger } from "@mastra/core/logger";
 import agents from "./agents"; // Central agent registry map
-import { ragWorkflow } from "./workflows";
+import { ragWorkflow, multiAgentWorkflow, workflowFactory } from "./workflows";
 // Import agent networks from the networks file
 import { networks } from "./workflows/Networks/agentNetwork";
+
 
 // Configure logger with appropriate level based on environment
 const logger = createLogger({
@@ -29,7 +30,7 @@ logger.info("Initializing Mastra instance...");
 export const mastra = new Mastra({
   agents: agents, // All registered agents
   networks: networks, // All registered agent networks
-  workflows: { ragWorkflow }, // Workflows from workflows/index.ts
+  workflows: { ragWorkflow, multiAgentWorkflow }, // Workflows from workflows/index.ts (workflowFactory removed as it's a function)
   logger: logger, // Configured logger
   // Add other global configs as needed (storage, vectors, telemetry, etc.)
 });
@@ -46,3 +47,5 @@ if (agentCount > 0) {
 if (networkCount > 0) {
   logger.debug(`Registered Network IDs: ${Object.keys(networks).join(", ")}`);
 }
+
+

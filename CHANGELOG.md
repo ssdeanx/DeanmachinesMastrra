@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.0.14] - 2025-04-19
+
+### Added
+
+- **Agent Usage Standardization**
+  - All agents (researchAgent, analystAgent, writerAgent, copywriterAgent, etc.) now use the `.generate()` method as the standard command for invoking agent logic within workflows and other orchestration code.
+  - This change ensures consistency and type safety across all workflow steps and agent integrations.
+
+#### Example Usage
+
+The following code snippet demonstrates the new standard for invoking agents:
+
+```typescript
+// Correct usage for all agents in workflow steps:
+const { text } = await researchAgent.generate(queryInput);
+const { text } = await analystAgent.generate(researchResult);
+const { text } = await writerAgent.generate(analysisResult);
+const { text } = await copywriterAgent.generate(writingResult);
+```
+
+- All previous usages of `.run`, `.call`, `.chat`, or direct function invocation have been replaced with `.generate()` for clarity and compatibility with the Mastra agent API.
+
+### Changed
+
+- Updated all workflow steps in `multiagentWorkflow.ts` and related files to use `.generate()` for agent execution.
+- Improved documentation and inline comments to clarify the `.generate()` pattern for future maintainers.
+
+### Notes
+
+- The `.generate()` method is now the **only supported way** to invoke agent logic in this codebase.
+- This standardization prevents confusion and runtime errors related to agent invocation.
+- Please update any custom agents or tools to implement a `.generate()` method if they do not already.
+
+---
+
 ## [v0.0.13] - 2025-04-19
 
 ### Added

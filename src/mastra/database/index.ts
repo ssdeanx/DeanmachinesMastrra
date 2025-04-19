@@ -9,6 +9,11 @@ import { LibSQLStore } from "@mastra/core/storage/libsql";
 import { LibSQLVector } from "@mastra/core/vector/libsql";
 import { Memory } from "@mastra/memory";
 import type { MastraStorage, MastraVector } from "@mastra/core";
+import { createLogger } from "@mastra/core/logger";
+
+const logger = createLogger({ name: "Memory", level: "debug" });
+
+logger.info("Initializing Memory with LibSQL storage");
 
 // Define the memory configuration type
 export interface MemoryConfig {
@@ -31,12 +36,12 @@ export interface MemoryConfig {
 
 // Default memory configuration that works well for most agents
 const defaultMemoryConfig: MemoryConfig = {
-  lastMessages: 50,
+  lastMessages: 200,
   semanticRecall: {
-    topK: 5,
+    topK: 8,
     messageRange: {
-      before: 2,
-      after: 1,
+      before: 4,
+      after: 2,
     },
   },
   workingMemory: {

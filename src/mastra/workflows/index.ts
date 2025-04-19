@@ -7,7 +7,8 @@ import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
 import { Pinecone } from "@pinecone-database/pinecone";
 import { google } from "@ai-sdk/google";
 import { generateText } from "ai";
-
+import { multiAgentWorkflow } from "./multiagentWorkflow";
+import  workflowFactory from "./workflowFactory";
 const embeddings = new GoogleGenerativeAIEmbeddings({
   apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY!,
 });
@@ -346,5 +347,12 @@ export { ragWorkflow };
 // Export agent networks
 export * from "./Networks/agentNetwork";
 export * from "./workflowFactory";
+export { multiAgentWorkflow };
+
+
+
+// Export the workflowFactory for use in other parts of the application
+export { workflowFactory };
+
 // TODO: Add and export additional workflow definitions here as they are developed
 // export * from "./researchWorkflow";

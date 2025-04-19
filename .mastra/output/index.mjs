@@ -153,12 +153,12 @@ const OTelAttributeNames = {
   TOTAL_TOKENS: "ai.tokens.total",
   LATENCY_MS: "ai.latency.ms"};
 
-const logger$r = createLogger({ name: "signoz-service", level: "info" });
+const logger$t = createLogger({ name: "signoz-service", level: "info" });
 let tracerProvider = null;
 let tracer = null;
 function initSigNoz(config) {
   if (config.enabled === false) {
-    logger$r.info("SigNoz tracing is disabled");
+    logger$t.info("SigNoz tracing is disabled");
     return { tracer: null, meter: null };
   }
   if (tracer) {
@@ -168,7 +168,7 @@ function initSigNoz(config) {
     const serviceName = config.serviceName || "deanmachines-ai";
     const endpoint = config.export?.endpoint || env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces";
     const headers = config.export?.headers || {};
-    logger$r.info(`Initializing SigNoz tracing for service: ${serviceName}`, { endpoint });
+    logger$t.info(`Initializing SigNoz tracing for service: ${serviceName}`, { endpoint });
     const resource = resourceFromAttributes({
       [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
       [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: env.NODE_ENV || "development"
@@ -181,7 +181,7 @@ function initSigNoz(config) {
     processors.push(new BatchSpanProcessor(otlpExporter));
     if (env.NODE_ENV !== "production") {
       processors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
-      logger$r.debug("Added console span exporter for debugging");
+      logger$t.debug("Added console span exporter for debugging");
     }
     tracerProvider = new NodeTracerProvider({
       resource,
@@ -189,7 +189,7 @@ function initSigNoz(config) {
     });
     tracerProvider.register();
     tracer = api.trace.getTracer("deanmachines-tracer");
-    logger$r.info("SigNoz tracing initialized successfully");
+    logger$t.info("SigNoz tracing initialized successfully");
     const metricExporter = new OTLPMetricExporter({
       url: env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT || endpoint.replace("/v1/traces", "/v1/metrics"),
       headers
@@ -205,11 +205,11 @@ function initSigNoz(config) {
       readers: [metricReader]
     });
     if (env.NODE_ENV !== "production") {
-      logger$r.debug("SigNoz metrics exporter configured");
+      logger$t.debug("SigNoz metrics exporter configured");
     }
     return { tracer, meter: meterProvider };
   } catch (error) {
-    logger$r.error("Failed to initialize SigNoz tracing", {
+    logger$t.error("Failed to initialize SigNoz tracing", {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : void 0
     });
@@ -224,7 +224,7 @@ function getTracer() {
 }
 function createAISpan(name, attributes = {}) {
   if (!tracer) {
-    logger$r.warn("Creating span without initialized SigNoz tracing");
+    logger$t.warn("Creating span without initialized SigNoz tracing");
     return api.trace.getTracer("no-op").startSpan(name);
   }
   return tracer.startSpan(name, {
@@ -306,7 +306,7 @@ var signoz = {
   }
 };
 
-const logger$q = createLogger({ name: "opentelemetry-tracing", level: "info" });
+const logger$s = createLogger({ name: "opentelemetry-tracing", level: "info" });
 function initOpenTelemetry({
   serviceName = "deanmachines-ai",
   serviceVersion = "1.0.0",
@@ -317,7 +317,7 @@ function initOpenTelemetry({
   metricsIntervalMs = 6e4
 }) {
   if (!enabled) {
-    logger$q.info("OpenTelemetry tracing is disabled");
+    logger$s.info("OpenTelemetry tracing is disabled");
     return null;
   }
   const exporterUrl = endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4317/v1/traces";
@@ -341,23 +341,23 @@ function initOpenTelemetry({
       exportIntervalMillis: metricsIntervalMs
     });
     sdkConfig.metricReader = metricReader;
-    logger$q.info("OpenTelemetry metrics enabled");
+    logger$s.info("OpenTelemetry metrics enabled");
   }
   const sdk = new NodeSDK(sdkConfig);
   try {
     sdk.start();
-    logger$q.info("OpenTelemetry SDK initialized successfully");
+    logger$s.info("OpenTelemetry SDK initialized successfully");
   } catch (initError) {
-    logger$q.error("Error initializing OpenTelemetry SDK", {
+    logger$s.error("Error initializing OpenTelemetry SDK", {
       error: initError instanceof Error ? initError.message : String(initError)
     });
   }
   process$1.on("SIGTERM", async () => {
     try {
       await sdk.shutdown();
-      logger$q.info("OpenTelemetry SDK shut down successfully");
+      logger$s.info("OpenTelemetry SDK shut down successfully");
     } catch (shutdownError) {
-      logger$q.error("Error shutting down OpenTelemetry SDK", {
+      logger$s.error("Error shutting down OpenTelemetry SDK", {
         error: shutdownError instanceof Error ? shutdownError.message : String(shutdownError)
       });
     } finally {
@@ -2591,7 +2591,7 @@ z.object({
   ).optional().describe("Recommendations for further improvements")
 });
 
-const logger$p = createLogger({ name: "langfuse-service", level: "info" });
+const logger$r = createLogger({ name: "langfuse-service", level: "info" });
 const envSchema$2 = z.object({
   LANGFUSE_PUBLIC_KEY: z.string().min(1, "Langfuse public key is required"),
   LANGFUSE_SECRET_KEY: z.string().min(1, "Langfuse secret key is required"),
@@ -2604,12 +2604,12 @@ function validateEnv() {
     if (error instanceof z.ZodError) {
       const missingKeys = error.errors.filter((e) => e.code === "invalid_type" && e.received === "undefined").map((e) => e.path.join("."));
       if (missingKeys.length > 0) {
-        logger$p.error(
+        logger$r.error(
           `Missing required environment variables: ${missingKeys.join(", ")}`
         );
       }
     }
-    logger$p.error("Langfuse environment validation failed:", { error });
+    logger$r.error("Langfuse environment validation failed:", { error });
     throw new Error(
       `Langfuse service configuration error: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -2624,7 +2624,7 @@ function createLangfuseClient() {
       baseUrl: validatedEnv$1.LANGFUSE_HOST
     });
   } catch (error) {
-    logger$p.error("Failed to create Langfuse client:", { error });
+    logger$r.error("Failed to create Langfuse client:", { error });
     throw new Error(
       `Langfuse client creation failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -2645,10 +2645,10 @@ class LangfuseService {
    */
   createTrace(name, options) {
     try {
-      logger$p.debug("Creating Langfuse trace", { name, ...options });
+      logger$r.debug("Creating Langfuse trace", { name, ...options });
       return this.client.trace({ name, ...options });
     } catch (error) {
-      logger$p.error("Error creating trace:", { error, name });
+      logger$r.error("Error creating trace:", { error, name });
       throw new Error(`Failed to create Langfuse trace: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2661,10 +2661,10 @@ class LangfuseService {
    */
   createSpan(name, options) {
     try {
-      logger$p.debug("Creating Langfuse span", { name, ...options });
+      logger$r.debug("Creating Langfuse span", { name, ...options });
       return this.client.span({ name, ...options });
     } catch (error) {
-      logger$p.error("Error creating span:", { error, name });
+      logger$r.error("Error creating span:", { error, name });
       throw new Error(`Failed to create Langfuse span: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2677,10 +2677,10 @@ class LangfuseService {
    */
   logGeneration(name, options) {
     try {
-      logger$p.debug("Logging Langfuse generation", { name, ...options });
+      logger$r.debug("Logging Langfuse generation", { name, ...options });
       return this.client.generation({ name, ...options });
     } catch (error) {
-      logger$p.error("Error logging generation:", { error, name });
+      logger$r.error("Error logging generation:", { error, name });
       throw new Error(`Failed to log Langfuse generation: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2693,13 +2693,13 @@ class LangfuseService {
    */
   createScore(options) {
     try {
-      logger$p.debug("Creating Langfuse score", options);
+      logger$r.debug("Creating Langfuse score", options);
       if (!options.traceId && !options.spanId && !options.generationId) {
         throw new Error("At least one of traceId, spanId, or generationId must be provided");
       }
       return this.client.score(options);
     } catch (error) {
-      logger$p.error("Error creating score:", { error, name: options.name });
+      logger$r.error("Error creating score:", { error, name: options.name });
       throw new Error(`Failed to create Langfuse score: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2711,16 +2711,16 @@ class LangfuseService {
   async flush() {
     try {
       await this.client.flush();
-      logger$p.debug("Flushed Langfuse events");
+      logger$r.debug("Flushed Langfuse events");
     } catch (error) {
-      logger$p.error("Error flushing Langfuse events:", { error });
+      logger$r.error("Error flushing Langfuse events:", { error });
       throw new Error(`Failed to flush Langfuse events: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
 const langfuse = new LangfuseService();
 
-const logger$o = createLogger({ name: "mastra-hooks", level: "debug" });
+const logger$q = createLogger({ name: "mastra-hooks", level: "debug" });
 function createResponseHook(config = {}) {
   const {
     minResponseLength = 10,
@@ -2735,7 +2735,7 @@ function createResponseHook(config = {}) {
       const currentSpan = trace.getSpan(currentContext);
       const traceId = currentSpan?.spanContext().traceId;
       const spanId = currentSpan?.spanContext().spanId;
-      logger$o.debug(`Response hook executing (attempt ${attempt}/${maxAttempts})`, {
+      logger$q.debug(`Response hook executing (attempt ${attempt}/${maxAttempts})`, {
         traceId,
         spanId,
         hasText: !!response.text,
@@ -2750,7 +2750,7 @@ function createResponseHook(config = {}) {
             comment: `Response validation attempt ${attempt}/${maxAttempts}`
           });
         } catch (err) {
-          logger$o.warn("Failed to record validation in Langfuse", { error: err });
+          logger$q.warn("Failed to record validation in Langfuse", { error: err });
         }
       }
       if (validateResponse(response)) {
@@ -2768,10 +2768,10 @@ function createResponseHook(config = {}) {
             hookSpan.setAttribute("response.attempt", attempt);
             hookSpan.end();
           }
-          logger$o.info(`Empty response, retrying (${attempt}/${maxAttempts})`);
+          logger$q.info(`Empty response, retrying (${attempt}/${maxAttempts})`);
           return onResponse(response, attempt + 1);
         }
-        logger$o.warn(`Maximum retry attempts reached (${maxAttempts})`);
+        logger$q.warn(`Maximum retry attempts reached (${maxAttempts})`);
         if (hookSpan) {
           hookSpan.setStatus({
             code: SpanStatusCode$1.ERROR,
@@ -2785,7 +2785,7 @@ function createResponseHook(config = {}) {
         };
       }
       if (response.text && response.text.length < minResponseLength) {
-        logger$o.debug(`Response too short (${response.text.length} < ${minResponseLength}), adding suggestion for elaboration`);
+        logger$q.debug(`Response too short (${response.text.length} < ${minResponseLength}), adding suggestion for elaboration`);
         if (hookSpan) {
           hookSpan.setAttribute("response.tooShort", true);
           hookSpan.setAttribute("response.length", response.text.length);
@@ -2802,7 +2802,7 @@ function createResponseHook(config = {}) {
       }
       return response;
     } catch (error) {
-      logger$o.error("Response hook error:", { error });
+      logger$q.error("Response hook error:", { error });
       if (hookSpan) {
         hookSpan.setStatus({
           code: SpanStatusCode$1.ERROR,
@@ -2879,7 +2879,7 @@ function createEmbeddings(apiKey, modelName) {
   });
 }
 
-const logger$n = createLogger({ name: "vector-query-tool", level: "info" });
+const logger$p = createLogger({ name: "vector-query-tool", level: "info" });
 const envSchema$1 = z.object({
   GOOGLE_AI_API_KEY: z.string().min(1, "Google AI API key is required"),
   PINECONE_INDEX: z.string().default("Default"),
@@ -2890,7 +2890,7 @@ const validatedEnv = (() => {
   try {
     return envSchema$1.parse(env);
   } catch (error) {
-    logger$n.error("Environment validation failed:", { error });
+    logger$p.error("Environment validation failed:", { error });
     throw new Error(
       `Vector query tool configuration error: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -2905,12 +2905,12 @@ function createMastraVectorQueryTool(config = {}) {
     const dimensions = config.dimensions || validatedEnv.PINECONE_DIMENSION;
     const apiKey = config.apiKey || validatedEnv.GOOGLE_AI_API_KEY;
     const topK = config.topK || 5;
-    logger$n.info(
+    logger$p.info(
       `Creating vector query tool for ${vectorStoreName}:${indexName}`
     );
     let embeddingModel;
     if (embeddingProvider === "tiktoken") {
-      logger$n.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
+      logger$p.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
       const tiktokenAdapter = {
         specificationVersion: "v1",
         provider: "tiktoken",
@@ -2934,7 +2934,7 @@ function createMastraVectorQueryTool(config = {}) {
             }
             return { embeddings: [{ embedding }] };
           } catch (error) {
-            logger$n.error("Tiktoken embedding error:", { error });
+            logger$p.error("Tiktoken embedding error:", { error });
             throw new Error(
               `Tiktoken embedding failed: ${error instanceof Error ? error.message : String(error)}`
             );
@@ -2964,7 +2964,7 @@ function createMastraVectorQueryTool(config = {}) {
       };
       embeddingModel = tiktokenAdapter;
     } else {
-      logger$n.info("Using Google embeddings");
+      logger$p.info("Using Google embeddings");
       embeddingModel = createEmbeddings(
         apiKey,
         "models/gemini-embedding-exp-03-07"
@@ -2992,10 +2992,10 @@ function createMastraVectorQueryTool(config = {}) {
       description,
       enableFilter: config.enableFilters
     });
-    logger$n.info(`Vector query tool created: ${toolId}`);
+    logger$p.info(`Vector query tool created: ${toolId}`);
     return tool;
   } catch (error) {
-    logger$n.error("Failed to create vector query tool:", { error });
+    logger$p.error("Failed to create vector query tool:", { error });
     throw new Error(
       `Vector query tool creation failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -4089,7 +4089,7 @@ const listFilesTool = createTool({
   }
 });
 
-const logger$m = createLogger({ name: "thread-manager", level: "info" });
+const logger$o = createLogger({ name: "thread-manager", level: "info" });
 class ThreadManager {
   threads = /* @__PURE__ */ new Map();
   resourceThreads = /* @__PURE__ */ new Map();
@@ -4103,7 +4103,7 @@ class ThreadManager {
    */
   async createThread(options) {
     const span = createAISpan("thread.create", { resourceId: options.resourceId });
-    logger$m.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
+    logger$o.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
     const startTime = Date.now();
     let runId;
     try {
@@ -4119,7 +4119,7 @@ class ThreadManager {
         this.resourceThreads.set(options.resourceId, /* @__PURE__ */ new Set());
       }
       this.resourceThreads.get(options.resourceId)?.add(threadId);
-      logger$m.info("Thread created", { threadId, resourceId: options.resourceId });
+      logger$o.info("Thread created", { threadId, resourceId: options.resourceId });
       span.setStatus({ code: 1 });
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "success" });
       runId = await createLangSmithRun("thread.create", [options.resourceId]);
@@ -4128,7 +4128,7 @@ class ThreadManager {
     } catch (error) {
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "error", errorMessage: String(error) });
       if (runId) await trackFeedback(runId, { score: 0, comment: "Thread creation failed", value: error });
-      logger$m.error("Failed to create thread", { error });
+      logger$o.error("Failed to create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -4145,11 +4145,11 @@ class ThreadManager {
     const span = createAISpan("thread.get", { threadId });
     try {
       const thread = this.threads.get(threadId);
-      logger$m.info("Get thread", { threadId, found: !!thread });
+      logger$o.info("Get thread", { threadId, found: !!thread });
       span.setStatus({ code: 1 });
       return thread;
     } catch (error) {
-      logger$m.error("Failed to get thread", { error });
+      logger$o.error("Failed to get thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -4167,11 +4167,11 @@ class ThreadManager {
     try {
       const threadIds = this.resourceThreads.get(resourceId) || /* @__PURE__ */ new Set();
       const threads = Array.from(threadIds).map((id) => this.threads.get(id)).filter((thread) => thread !== void 0);
-      logger$m.info("Get threads by resource", { resourceId, count: threads.length });
+      logger$o.info("Get threads by resource", { resourceId, count: threads.length });
       span.setStatus({ code: 1 });
       return threads;
     } catch (error) {
-      logger$m.error("Failed to get threads by resource", { error });
+      logger$o.error("Failed to get threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -4189,16 +4189,16 @@ class ThreadManager {
     try {
       const threads = this.getThreadsByResource(resourceId);
       if (threads.length === 0) {
-        logger$m.info("No threads found for resource", { resourceId });
+        logger$o.info("No threads found for resource", { resourceId });
         span.setStatus({ code: 1 });
         return void 0;
       }
       const mostRecent = threads.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-      logger$m.info("Most recent thread", { resourceId, threadId: mostRecent.id });
+      logger$o.info("Most recent thread", { resourceId, threadId: mostRecent.id });
       span.setStatus({ code: 1 });
       return mostRecent;
     } catch (error) {
-      logger$m.error("Failed to get most recent thread", { error });
+      logger$o.error("Failed to get most recent thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -4217,16 +4217,16 @@ class ThreadManager {
     try {
       const existingThread = this.getMostRecentThread(resourceId);
       if (existingThread) {
-        logger$m.info("Found existing thread", { resourceId, threadId: existingThread.id });
+        logger$o.info("Found existing thread", { resourceId, threadId: existingThread.id });
         span.setStatus({ code: 1 });
         return existingThread;
       }
-      logger$m.info("No existing thread, creating new", { resourceId });
+      logger$o.info("No existing thread, creating new", { resourceId });
       const newThread = await this.createThread({ resourceId, metadata });
       span.setStatus({ code: 1 });
       return newThread;
     } catch (error) {
-      logger$m.error("Failed to get or create thread", { error });
+      logger$o.error("Failed to get or create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -4245,11 +4245,11 @@ class ThreadManager {
       const thread = this.threads.get(threadId);
       if (thread) {
         thread.lastReadAt = date;
-        logger$m.info("Marked thread as read", { threadId, date });
+        logger$o.info("Marked thread as read", { threadId, date });
       }
       span.setStatus({ code: 1 });
     } catch (error) {
-      logger$m.error("Failed to mark thread as read", { error });
+      logger$o.error("Failed to mark thread as read", { error });
       span.setStatus({ code: 2, message: String(error) });
     } finally {
       span.end();
@@ -4268,11 +4268,11 @@ class ThreadManager {
         const lastRead = this.threadReadStatus.get(thread.id);
         return !lastRead || thread.createdAt > lastRead;
       });
-      logger$m.info("Get unread threads by resource", { resourceId, count: unread.length });
+      logger$o.info("Get unread threads by resource", { resourceId, count: unread.length });
       span.setStatus({ code: 1 });
       return unread;
     } catch (error) {
-      logger$m.error("Failed to get unread threads by resource", { error });
+      logger$o.error("Failed to get unread threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -4729,13 +4729,15 @@ function determineTrend(values) {
   return "stable";
 }
 
+const logger$n = createLogger({ name: "Memory", level: "debug" });
+logger$n.info("Initializing Memory with LibSQL storage");
 const defaultMemoryConfig = {
-  lastMessages: 50,
+  lastMessages: 200,
   semanticRecall: {
-    topK: 5,
+    topK: 8,
     messageRange: {
-      before: 2,
-      after: 1
+      before: 4,
+      after: 2
     }
   },
   workingMemory: {
@@ -5162,7 +5164,7 @@ const formatContentTool = createTool({
   }
 });
 
-const logger$l = createLogger({ name: "document-tools", level: process.env.LOG_LEVEL === "debug" ? "debug" : "info" });
+const logger$m = createLogger({ name: "document-tools", level: process.env.LOG_LEVEL === "debug" ? "debug" : "info" });
 const documentRepository = [
   {
     id: "1",
@@ -5303,19 +5305,19 @@ const extractHtmlTextTool = createTool({
     try {
       let html = context.html;
       if (!html && context.url) {
-        logger$l.info(`Fetching HTML from URL: ${context.url}`);
+        logger$m.info(`Fetching HTML from URL: ${context.url}`);
         const response = await fetch(context.url);
         if (!response.ok) throw new Error(`Failed to fetch URL: ${response.statusText}`);
         html = await response.text();
       }
       if (!html) throw new Error("No HTML content provided or fetched.");
-      logger$l.info("Extracting text from HTML using cheerio");
+      logger$m.info("Extracting text from HTML using cheerio");
       const $ = cheerio.load(html);
       const text = $("body").text();
       recordMetrics(span, { status: "success" });
       return { text };
     } catch (error) {
-      logger$l.error(`extractHtmlTextTool error: ${error instanceof Error ? error.message : String(error)}`);
+      logger$m.error(`extractHtmlTextTool error: ${error instanceof Error ? error.message : String(error)}`);
       recordMetrics(span, { status: "error", errorMessage: error instanceof Error ? error.message : String(error) });
       throw error;
     } finally {
@@ -6616,7 +6618,7 @@ const github = new GithubIntegration({
   }
 });
 
-const logger$k = createLogger({ name: "evals", level: "info" });
+const logger$l = createLogger({ name: "evals", level: "info" });
 function getEvalModelId() {
   return process.env.EVAL_MODEL_ID || "models/gemini-2.0-flashlite";
 }
@@ -7082,12 +7084,12 @@ const faithfulnessEvalTool = createTool({
       const explanation = `Matched ${matched} of ${facts.length} reference facts.`;
       signoz.recordMetrics(span, { latencyMs: performance.now() - startTime, status: "success" });
       span.end();
-      logger$k.info("Faithfulness eval result", { score, explanation, response: context.response });
+      logger$l.info("Faithfulness eval result", { score, explanation, response: context.response });
       return { score, explanation, success: true };
     } catch (error) {
       signoz.recordMetrics(span, { latencyMs: performance.now() - startTime, status: "error", errorMessage: error instanceof Error ? error.message : String(error) });
       span.end();
-      logger$k.error("Faithfulness eval error", { error });
+      logger$l.error("Faithfulness eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -7125,12 +7127,12 @@ const biasEvalTool = createTool({
       const found = biasKeywords.filter((k) => lower.includes(k));
       const score = found.length > 0 ? Math.min(1, found.length * 0.3) : 0;
       const explanation = found.length > 0 ? `Detected possible bias: ${found.join(", ")}` : "No obvious bias detected.";
-      logger$k.info("Bias eval result", { score, explanation, response: context.response });
+      logger$l.info("Bias eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$k.error("Bias eval error", { error });
+      logger$l.error("Bias eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -7169,12 +7171,12 @@ const toxicityEvalTool = createTool({
       const found = toxicKeywords.filter((k) => lower.includes(k));
       const score = found.length > 0 ? Math.min(1, found.length * 0.2) : 0;
       const explanation = found.length > 0 ? `Detected possible toxicity: ${found.join(", ")}` : "No obvious toxicity detected.";
-      logger$k.info("Toxicity eval result", { score, explanation, response: context.response });
+      logger$l.info("Toxicity eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$k.error("Toxicity eval error", { error });
+      logger$l.error("Toxicity eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -7206,12 +7208,12 @@ const hallucinationEvalTool = createTool({
       }
       const score = sentences.length > 0 ? hallucinated / sentences.length : 0;
       const explanation = hallucinated > 0 ? `${hallucinated} of ${sentences.length} sentences may be hallucinated.` : "No obvious hallucinations detected.";
-      logger$k.info("Hallucination eval result", { score, explanation, response: context.response });
+      logger$l.info("Hallucination eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$k.error("Hallucination eval error", { error });
+      logger$l.error("Hallucination eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -7239,12 +7241,12 @@ const summarizationEvalTool = createTool({
       const brevity = 1 - Math.min(1, context.summary.length / (context.reference.length || 1));
       const score = Math.max(0, Math.min(1, coverage * 0.7 + brevity * 0.3));
       const explanation = `Coverage: ${(coverage * 100).toFixed(0)}%, Brevity: ${(brevity * 100).toFixed(0)}%`;
-      logger$k.info("Summarization eval result", { score, explanation, summary: context.summary });
+      logger$l.info("Summarization eval result", { score, explanation, summary: context.summary });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$k.error("Summarization eval error", { error });
+      logger$l.error("Summarization eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -7868,7 +7870,7 @@ function createMastraRedditTools() {
   return mastraTools;
 }
 
-const logger$j = createLogger({ name: "tool-initialization", level: "info" });
+const logger$k = createLogger({ name: "tool-initialization", level: "info" });
 const envSchema = z.object({
   GOOGLE_AI_API_KEY: z.string().min(1, "Google AI API key is required"),
   PINECONE_API_KEY: z.string().min(1, "Pinecone API key is required"),
@@ -7891,12 +7893,12 @@ function validateConfig() {
     if (error instanceof z.ZodError) {
       const missingKeys = error.errors.filter((e) => e.code === "invalid_type" && e.received === "undefined").map((e) => e.path.join("."));
       if (missingKeys.length > 0) {
-        logger$j.error(
+        logger$k.error(
           `Missing required environment variables: ${missingKeys.join(", ")}`
         );
       }
     }
-    logger$j.error("Environment validation failed:", { error });
+    logger$k.error("Environment validation failed:", { error });
     throw new Error(
       `Failed to validate environment configuration: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -7917,7 +7919,7 @@ const getMainBranchRef = createTool({
   async execute(context) {
     const client = await github.getApiClient();
     if (!client || !client.git || typeof client.git.getRef !== "function") {
-      logger$j.error("GitHub client or git.getRef method not available.");
+      logger$k.error("GitHub client or git.getRef method not available.");
       throw new Error("GitHub integration is not configured correctly.");
     }
     try {
@@ -7932,10 +7934,10 @@ const getMainBranchRef = createTool({
       return { ref: mainRef?.data?.ref };
     } catch (error) {
       if (error.status === 404) {
-        logger$j.warn(`Main branch ref not found for ${context.context.owner}/${context.context.repo}`);
+        logger$k.warn(`Main branch ref not found for ${context.context.owner}/${context.context.repo}`);
         return { ref: void 0 };
       }
-      logger$j.error(`Error fetching main branch ref for ${context.context.owner}/${context.context.repo}:`, error);
+      logger$k.error(`Error fetching main branch ref for ${context.context.owner}/${context.context.repo}:`, error);
       throw error;
     }
   }
@@ -7944,7 +7946,7 @@ function ensureToolOutputSchema(tool) {
   if (tool.outputSchema && tool.outputSchema instanceof ZodType) {
     return tool;
   }
-  logger$j.warn(`Tool "${tool.id}" missing valid output schema, defaulting to empty object.`);
+  logger$k.warn(`Tool "${tool.id}" missing valid output schema, defaulting to empty object.`);
   return {
     ...tool,
     outputSchema: z.object({}).describe("Default empty output")
@@ -8013,9 +8015,9 @@ try {
   const e2bToolsObject = createMastraE2BTools();
   const e2bToolsArray = Object.values(e2bToolsObject);
   extraTools.push(...e2bToolsArray.map((tool) => tool));
-  logger$j.info(`Added ${e2bToolsArray.length} E2B tools.`);
+  logger$k.info(`Added ${e2bToolsArray.length} E2B tools.`);
 } catch (error) {
-  logger$j.error("Failed to initialize E2B tools:", { error });
+  logger$k.error("Failed to initialize E2B tools:", { error });
 }
 try {
   const llamaIndexArrayRaw = createLlamaIndexTools();
@@ -8033,90 +8035,90 @@ try {
       return ensureToolOutputSchema(mastraTool);
     });
     extraTools.push(...llamaIndexTools);
-    logger$j.info(`Added ${llamaIndexTools.length} LlamaIndex tools.`);
+    logger$k.info(`Added ${llamaIndexTools.length} LlamaIndex tools.`);
   } else {
-    logger$j.warn("createLlamaIndexTools did not return an array.");
+    logger$k.warn("createLlamaIndexTools did not return an array.");
   }
 } catch (error) {
-  logger$j.error("Failed to initialize LlamaIndex tools:", { error });
+  logger$k.error("Failed to initialize LlamaIndex tools:", { error });
 }
 try {
   const mcpToolsObject = await createMastraMcpTools();
   const mcpToolsArray = Object.values(mcpToolsObject);
   extraTools.push(...mcpToolsArray.map((tool) => tool));
-  logger$j.info(`Added ${mcpToolsArray.length} MCP tools.`);
+  logger$k.info(`Added ${mcpToolsArray.length} MCP tools.`);
 } catch (error) {
-  logger$j.error("Failed to initialize MCP tools:", { error });
+  logger$k.error("Failed to initialize MCP tools:", { error });
 }
 try {
   const arxivToolsObject = createMastraArxivTools();
   const arxivToolsArray = Object.values(arxivToolsObject);
   extraTools.push(...arxivToolsArray.map((tool) => tool));
-  logger$j.info(`Added ${arxivToolsArray.length} Arxiv tools.`);
+  logger$k.info(`Added ${arxivToolsArray.length} Arxiv tools.`);
 } catch (error) {
-  logger$j.error("Failed to initialize Arxiv tools:", { error });
+  logger$k.error("Failed to initialize Arxiv tools:", { error });
 }
 try {
   const aisdkToolsObject = createMastraAISDKTools();
   const aisdkToolsArray = Object.values(aisdkToolsObject);
   extraTools.push(...aisdkToolsArray.map((tool) => tool));
-  logger$j.info(`Added ${aisdkToolsArray.length} AI SDK tools (via Mastra helper).`);
+  logger$k.info(`Added ${aisdkToolsArray.length} AI SDK tools (via Mastra helper).`);
 } catch (error) {
-  logger$j.error("Failed to initialize AI SDK tools:", { error });
+  logger$k.error("Failed to initialize AI SDK tools:", { error });
 }
 try {
   const wikiToolsObject = createMastraWikipediaTools();
   const wikiToolsArray = Object.values(wikiToolsObject);
   extraTools.push(...wikiToolsArray.map((tool) => tool));
-  logger$j.info(`Added ${wikiToolsArray.length} Wikipedia tools.`);
+  logger$k.info(`Added ${wikiToolsArray.length} Wikipedia tools.`);
 } catch (error) {
-  logger$j.error("Failed to initialize Wikipedia tools:", { error });
+  logger$k.error("Failed to initialize Wikipedia tools:", { error });
 }
 try {
   if (createGraphRagTool && typeof createGraphRagTool === "object" && "id" in createGraphRagTool) {
     extraTools.push(ensureToolOutputSchema(createGraphRagTool));
   } else {
-    logger$j.warn("createGraphRagTool is not a valid Tool object.");
+    logger$k.warn("createGraphRagTool is not a valid Tool object.");
   }
   if (graphRagQueryTool && typeof graphRagQueryTool === "object" && "id" in graphRagQueryTool) {
     extraTools.push(ensureToolOutputSchema(graphRagQueryTool));
   } else {
-    logger$j.warn("graphRagQueryTool is not a valid Tool object.");
+    logger$k.warn("graphRagQueryTool is not a valid Tool object.");
   }
   if (createGraphRagTool && typeof createGraphRagTool === "object" && "id" in createGraphRagTool) {
     const baseTool = createGraphRagTool;
     const graphRagAliasTool = { ...baseTool, id: "graph-rag" };
     extraTools.push(ensureToolOutputSchema(graphRagAliasTool));
-    logger$j.info("Added GraphRag tools and 'graph-rag' alias.");
+    logger$k.info("Added GraphRag tools and 'graph-rag' alias.");
   } else {
-    logger$j.warn("Could not create 'graph-rag' alias: createGraphRagTool is not valid.");
+    logger$k.warn("Could not create 'graph-rag' alias: createGraphRagTool is not valid.");
   }
 } catch (error) {
-  logger$j.error("Failed to initialize GraphRag tools:", { error });
+  logger$k.error("Failed to initialize GraphRag tools:", { error });
 }
 try {
   const polygonToolsObject = createMastraPolygonTools({ apiKey: config.POLYGON_API_KEY });
   const polygonToolsArray = Object.values(polygonToolsObject);
   extraTools.push(...polygonToolsArray.map((tool) => tool));
-  logger$j.info(`Added ${polygonToolsArray.length} Polygon tools.`);
+  logger$k.info(`Added ${polygonToolsArray.length} Polygon tools.`);
 } catch (error) {
-  logger$j.error("Failed to initialize Polygon tools:", { error });
+  logger$k.error("Failed to initialize Polygon tools:", { error });
 }
 try {
   const redditToolsObject = createMastraRedditTools();
   const redditToolsArray = Object.values(redditToolsObject);
   extraTools.push(...redditToolsArray.map((tool) => tool));
-  logger$j.info(`Added ${redditToolsArray.length} Reddit tools.`);
+  logger$k.info(`Added ${redditToolsArray.length} Reddit tools.`);
 } catch (error) {
-  logger$j.error("Failed to initialize Reddit tools:", { error });
+  logger$k.error("Failed to initialize Reddit tools:", { error });
 }
 try {
   const githubToolsObject = createMastraGitHubTools();
   const githubToolsArray = Object.values(githubToolsObject);
   extraTools.push(...githubToolsArray.map((tool) => tool));
-  logger$j.info(`Added ${githubToolsArray.length} GitHub tools (via Mastra helper).`);
+  logger$k.info(`Added ${githubToolsArray.length} GitHub tools (via Mastra helper).`);
 } catch (error) {
-  logger$j.error("Failed to initialize GitHub tools:", { error });
+  logger$k.error("Failed to initialize GitHub tools:", { error });
 }
 extraTools.push(ensureToolOutputSchema(getMainBranchRef));
 extraTools.push(...tracingTools);
@@ -8135,15 +8137,15 @@ const allToolsMap = new Map(allTools.map((tool) => [tool.id, tool]));
 const toolGroups = {
   search: optionalTools,
   github: [getMainBranchRef, ...extraTools.filter((t) => t.id.startsWith("github_"))]};
-logger$j.info(`Initialized ${allTools.length} tools successfully.`);
-logger$j.info(
+logger$k.info(`Initialized ${allTools.length} tools successfully.`);
+logger$k.info(
   `Search tools available: ${toolGroups.search.map((t) => t.id).join(", ") || "none"}`
 );
-logger$j.info(`GraphRag tools included: ${extraTools.some((t) => t.id.startsWith("graphRag") || t.id === "createGraphRagTool" || t.id === "graph-rag")}`);
-logger$j.info(`LLMChain tools included: ${extraTools.some((t) => t.id.startsWith("llm-chain_"))}`);
-logger$j.info(`E2B tools included: ${extraTools.some((t) => t.id.startsWith("e2b_"))}`);
-logger$j.info(`Arxiv tools included: ${extraTools.some((t) => t.id.startsWith("arxiv_"))}`);
-logger$j.info(`AI SDK tools included: ${extraTools.some((t) => t.id.startsWith("ai-sdk_"))}`);
+logger$k.info(`GraphRag tools included: ${extraTools.some((t) => t.id.startsWith("graphRag") || t.id === "createGraphRagTool" || t.id === "graph-rag")}`);
+logger$k.info(`LLMChain tools included: ${extraTools.some((t) => t.id.startsWith("llm-chain_"))}`);
+logger$k.info(`E2B tools included: ${extraTools.some((t) => t.id.startsWith("e2b_"))}`);
+logger$k.info(`Arxiv tools included: ${extraTools.some((t) => t.id.startsWith("arxiv_"))}`);
+logger$k.info(`AI SDK tools included: ${extraTools.some((t) => t.id.startsWith("ai-sdk_"))}`);
 
 initializeDefaultTracing();
 const { tracer: signozTracer, meter } = initSigNoz({
@@ -8163,7 +8165,7 @@ const agentCreationLatency = agentMeter?.createHistogram("agent.creation.latency
   description: "Time taken to create an agent"
 });
 const baseLogger = createLogger({ name: "agent-initialization", level: "debug" });
-const logger$i = {
+const logger$j = {
   debug: (msg, meta) => {
     baseLogger.debug(msg, meta);
     upstashLogger.debug({ message: msg, ...meta });
@@ -8216,11 +8218,11 @@ function createAgentFromConfig({
   }
   if (missingTools.length > 0) {
     const errorMsg = `Missing required tools for agent ${config.id}: ${missingTools.join(", ")}`;
-    logger$i.error(errorMsg);
+    logger$j.error(errorMsg);
     throw new Error(errorMsg);
   }
   const responseHook = config.responseValidation ? createResponseHook(config.responseValidation) : void 0;
-  logger$i.info(
+  logger$j.info(
     `Creating agent: ${config.id} with ${Object.keys(tools).length} tools`
   );
   let agent;
@@ -8250,101 +8252,101 @@ function createAgentFromConfig({
   return agent;
 }
 
-const logger$h = createLogger({ name: "research-agent", level: "debug" });
+const logger$i = createLogger({ name: "research-agent", level: "debug" });
 const researchAgent = createAgentFromConfig({
   config: researchAgentConfig,
   memory: sharedMemory,
   // Following RULE-MemoryInjection
   onError: async (error) => {
-    logger$h.error("Research agent error:", error);
+    logger$i.error("Research agent error:", error);
     return {
       text: "I encountered an error during research. Please refine your query or check the available sources."
     };
   }
 });
 
-const logger$g = createLogger({ name: "analyst-agent", level: "debug" });
+const logger$h = createLogger({ name: "analyst-agent", level: "debug" });
 const analystAgent = createAgentFromConfig({
   config: analystAgentConfig,
   memory: sharedMemory,
   // Following RULE-MemoryInjection
   onError: async (error) => {
-    logger$g.error("Analyst agent error:", error);
+    logger$h.error("Analyst agent error:", error);
     return {
       text: "I encountered an error while analyzing data. Please provide additional context or clarify your request."
     };
   }
 });
 
-const logger$f = createLogger({ name: "writer-agent", level: "debug" });
+const logger$g = createLogger({ name: "writer-agent", level: "debug" });
 const writerAgent = createAgentFromConfig({
   config: writerAgentConfig,
   memory: sharedMemory,
   // Following RULE-MemoryInjection
   onError: async (error) => {
-    logger$f.error("Writer agent error:", error);
+    logger$g.error("Writer agent error:", error);
     return {
       text: "I encountered an error while generating content. Please provide more specific guidelines or context."
     };
   }
 });
 
-const logger$e = createLogger({ name: "rl-trainer-agent", level: "debug" });
+const logger$f = createLogger({ name: "rl-trainer-agent", level: "debug" });
 const rlTrainerAgent = createAgentFromConfig({
   config: rlTrainerAgentConfig,
   memory: sharedMemory,
   // Following RULE-MemoryInjection
   onError: async (error) => {
-    logger$e.error("RL Trainer agent error:", error);
+    logger$f.error("RL Trainer agent error:", error);
     return {
       text: "I encountered an error while processing reinforcement learning data. Please check the logs for details."
     };
   }
 });
 
-const logger$d = createLogger({ name: "data-manager-agent", level: "debug" });
+const logger$e = createLogger({ name: "data-manager-agent", level: "debug" });
 const dataManagerAgent = createAgentFromConfig({
   config: dataManagerAgentConfig,
   memory: sharedMemory,
   // Following RULE-MemoryInjection
   onError: async (error) => {
-    logger$d.error("Data Manager agent error:", error);
+    logger$e.error("Data Manager agent error:", error);
     return {
       text: "I encountered an error while managing data operations. Please provide additional details."
     };
   }
 });
 
-const logger$c = createLogger({ name: "agentic-agent", level: "debug" });
+const logger$d = createLogger({ name: "agentic-agent", level: "debug" });
 const agenticAssistant = createAgentFromConfig({
   config: agenticAssistantConfig,
   memory: sharedMemory,
   // Following RULE-MemoryInjection
   onError: async (error) => {
-    logger$c.error("Agentic agent error:", error);
+    logger$d.error("Agentic agent error:", error);
     return {
       text: "I encountered an error while analyzing data. Please provide additional context or clarify your request."
     };
   }
 });
 
-const logger$b = createLogger({ name: "coder-agent", level: "debug" });
+const logger$c = createLogger({ name: "coder-agent", level: "debug" });
 function initializeCoderAgent() {
-  logger$b.info("Initializing coder agent");
+  logger$c.info("Initializing coder agent");
   try {
     return createAgentFromConfig({
       config: coderAgentConfig,
       memory: sharedMemory,
       // Following RULE-MemoryInjection
       onError: async (error) => {
-        logger$b.error("Coder agent error:", error);
+        logger$c.error("Coder agent error:", error);
         return {
           text: "I encountered an error with code generation or analysis. Please provide more details or context."
         };
       }
     });
   } catch (error) {
-    logger$b.error(
+    logger$c.error(
       `Failed to initialize coder agent: ${error instanceof Error ? error.message : String(error)}`
     );
     throw error;
@@ -8352,23 +8354,23 @@ function initializeCoderAgent() {
 }
 const coderAgent = initializeCoderAgent();
 
-const logger$a = createLogger({ name: "copywriter-agent", level: "debug" });
+const logger$b = createLogger({ name: "copywriter-agent", level: "debug" });
 function initializeCopywriterAgent() {
-  logger$a.info("Initializing copywriter agent");
+  logger$b.info("Initializing copywriter agent");
   try {
     return createAgentFromConfig({
       config: copywriterAgentConfig,
       memory: sharedMemory,
       // Following RULE-MemoryInjection
       onError: async (error) => {
-        logger$a.error("Copywriter agent error:", error);
+        logger$b.error("Copywriter agent error:", error);
         return {
           text: "I encountered an error while creating content. Please provide more specific requirements."
         };
       }
     });
   } catch (error) {
-    logger$a.error(
+    logger$b.error(
       `Failed to initialize copywriter agent: ${error instanceof Error ? error.message : String(error)}`
     );
     throw error;
@@ -8376,91 +8378,91 @@ function initializeCopywriterAgent() {
 }
 const copywriterAgent = initializeCopywriterAgent();
 
-const logger$9 = createLogger({ name: "architect-agent", level: "debug" });
+const logger$a = createLogger({ name: "architect-agent", level: "debug" });
 const architectAgent = createAgentFromConfig({
   config: architectConfig,
   memory: sharedMemory,
   // Following RULE-MemoryInjection
   onError: async (error) => {
-    logger$9.error("Architect agent error:", error);
+    logger$a.error("Architect agent error:", error);
     return {
       text: "I encountered an error in architecture planning. Please try again."
     };
   }
 });
 
-const logger$8 = createLogger({ name: "debugger-agent", level: "debug" });
+const logger$9 = createLogger({ name: "debugger-agent", level: "debug" });
 const debuggerAgent = createAgentFromConfig({
   config: debuggerConfig,
   memory: sharedMemory,
   // Following RULE-MemoryInjection
   onError: async (error) => {
-    logger$8.error("Debugger agent error:", error);
+    logger$9.error("Debugger agent error:", error);
     return {
       text: "I encountered an error while debugging. Please provide more information about the issue."
     };
   }
 });
 
-const logger$7 = createLogger({ name: "ui-ux-coder-agent", level: "debug" });
+const logger$8 = createLogger({ name: "ui-ux-coder-agent", level: "debug" });
 const uiUxCoderAgent = createAgentFromConfig({
   config: uiUxCoderConfig,
   memory: sharedMemory,
   // Following RULE-MemoryInjection
   onError: async (error) => {
-    logger$7.error("UI/UX Coder agent error:", error);
+    logger$8.error("UI/UX Coder agent error:", error);
     return {
       text: "I encountered an error while implementing the UI. Please check the design specifications."
     };
   }
 });
 
-const logger$6 = createLogger({ name: "code-documenter-agent", level: "debug" });
+const logger$7 = createLogger({ name: "code-documenter-agent", level: "debug" });
 const codeDocumenterAgent = createAgentFromConfig({
   config: codeDocumenterConfig,
   memory: sharedMemory,
   // Following RULE-MemoryInjection
   onError: async (error) => {
-    logger$6.error("Code Documenter agent error:", error);
+    logger$7.error("Code Documenter agent error:", error);
     return {
       text: "I encountered an error while generating documentation. Please provide more context about the code."
     };
   }
 });
 
-const logger$5 = createLogger({ name: "market-research-agent", level: "debug" });
+const logger$6 = createLogger({ name: "market-research-agent", level: "debug" });
 const marketResearchAgent = createAgentFromConfig({
   config: marketResearchAgentConfig,
   memory: sharedMemory,
   // Following RULE-MemoryInjection
   onError: async (error) => {
-    logger$5.error("Market Research agent error:", error);
+    logger$6.error("Market Research agent error:", error);
     return {
       text: "I encountered an error while analyzing market data. Please provide more specific research parameters."
     };
   }
 });
 
-const logger$4 = createLogger({ name: "social-media-agent", level: "debug" });
+const logger$5 = createLogger({ name: "social-media-agent", level: "debug" });
 const socialMediaAgent = createAgentFromConfig({
   config: socialMediaAgentConfig,
   memory: sharedMemory,
   // Following RULE-MemoryInjection
   onError: async (error) => {
-    logger$4.error("Social Media agent error:", error);
+    logger$5.error("Social Media agent error:", error);
     return {
       text: "I encountered an error while creating social media content. Please provide more specific platform requirements."
     };
   }
 });
 
-const logger$3 = createLogger({ name: "seo-agent", level: "debug" });
+const logger$4 = createLogger({ name: "seo-agent", level: "debug" });
 const seoAgent = createAgentFromConfig({
   config: seoAgentConfig,
   memory: sharedMemory,
   // Following RULE-MemoryInjection
   onError: async (error) => {
-    logger$3.error("SEO agent error:", error);
+    logger$4.error("SEO agent error:", error);
     return {
       text: "I encountered an error while optimizing for search. Please provide more specific SEO requirements."
     };
@@ -8489,6 +8491,147 @@ const agents = {
   socialMediaAgent,
   seoAgent
 };
+
+const logger$3 = createLogger({ name: "multiagentWorkflow" });
+const storage = new LibSQLStore({
+  config: {
+    url: process.env.DATABASE_URL || "file:.mastra/mastra.db"
+  }
+});
+logger$3.info("Initializing multi-agent workflow with LibSQL storage");
+initializeDefaultTracing();
+const researchStep$1 = new Step({
+  id: "research",
+  description: "Researches the query and gathers relevant information",
+  inputSchema: z.object({
+    query: z.string().describe("The research query to investigate")
+  }),
+  execute: async ({ context }) => {
+    const triggerData = context.getStepResult("trigger");
+    const threadInfo = await threadManager.createThread({ resourceId: "research-thread" });
+    const threadId = threadInfo?.id || "default-thread-id";
+    const span = createAISpan("step.research", { threadId });
+    try {
+      const { text } = await researchAgent.generate(triggerData.query);
+      recordMetrics(span, { status: "success" });
+      return text;
+    } catch (error) {
+      recordMetrics(span, { status: "error", errorMessage: String(error) });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+});
+const analysisStep$1 = new Step({
+  id: "analysis",
+  description: "Analyzes the research findings and extracts insights",
+  inputSchema: z.object({
+    research: z.any()
+  }),
+  execute: async ({ context }) => {
+    const researchResult = context.getStepResult("research");
+    const threadInfo = await threadManager.getThread("research-thread");
+    const threadId = threadInfo?.id || "default-thread-id";
+    const span = createAISpan("step.analysis", { threadId });
+    try {
+      const { text } = await analystAgent.generate(researchResult);
+      recordMetrics(span, { status: "success" });
+      return text;
+    } catch (error) {
+      recordMetrics(span, { status: "error", errorMessage: String(error) });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+});
+const writingStep = new Step({
+  id: "writing",
+  description: "Drafts a document based on the analysis",
+  inputSchema: z.object({
+    analysis: z.any()
+  }),
+  execute: async ({ context }) => {
+    const analysisResult = context.getStepResult("analysis");
+    const threadInfo = await threadManager.getThread("research-thread");
+    const threadId = threadInfo?.id || "default-thread-id";
+    const span = createAISpan("step.writing", { threadId });
+    try {
+      const { text } = await writerAgent.generate(analysisResult);
+      recordMetrics(span, { status: "success" });
+      return text;
+    } catch (error) {
+      recordMetrics(span, { status: "error", errorMessage: String(error) });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+});
+const reviewStep = new Step({
+  id: "review",
+  description: "Reviews and polishes the draft",
+  inputSchema: z.object({
+    writing: z.any()
+  }),
+  execute: async ({ context }) => {
+    const writingResult = context.getStepResult("writing");
+    const threadInfo = await threadManager.getThread("research-thread");
+    const threadId = threadInfo?.id || "default-thread-id";
+    const span = createAISpan("step.review", { threadId });
+    try {
+      const { text } = await copywriterAgent.generate(writingResult);
+      recordMetrics(span, { status: "success" });
+      return text;
+    } catch (error) {
+      recordMetrics(span, { status: "error", errorMessage: String(error) });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+});
+const refinementStep = new Step({
+  id: "refinement",
+  description: "Refines the reviewed draft",
+  inputSchema: z.object({
+    review: z.any()
+  }),
+  execute: async ({ context }) => {
+    const reviewResult = context.getStepResult("review");
+    const threadInfo = await threadManager.getThread("research-thread");
+    const threadId = threadInfo?.id || "default-thread-id";
+    const span = createAISpan("step.refinement", { threadId });
+    try {
+      const { text } = await writerAgent.generate(reviewResult);
+      recordMetrics(span, { status: "success" });
+      return text;
+    } catch (error) {
+      recordMetrics(span, { status: "error", errorMessage: String(error) });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+});
+const multiAgentWorkflow = new Workflow({
+  name: "research-analyze-write-review-refine",
+  triggerSchema: z.object({
+    query: z.string().describe("Search query")
+  })
+}).step(researchStep$1).then(analysisStep$1).then(writingStep).then(reviewStep).then(refinementStep).commit();
+new Mastra({
+  storage,
+  // Use LibSQLStore instead of sharedMemory directly
+  agents: {
+    research: researchAgent,
+    analyst: analystAgent,
+    writer: writerAgent,
+    review: copywriterAgent
+  },
+  workflows: { multiAgentWorkflow }
+});
 
 const logger$2 = createLogger({ name: "KnowledgeWorkMoENetwork" });
 const DEFAULT_FALLBACK_AGENT_ID = "researchAgent";
@@ -9416,9 +9559,10 @@ const mastra = new Mastra({
   networks,
   // All registered agent networks
   workflows: {
-    ragWorkflow
+    ragWorkflow,
+    multiAgentWorkflow
   },
-  // Workflows from workflows/index.ts
+  // Workflows from workflows/index.ts (workflowFactory removed as it's a function)
   logger: logger$1
   // Configured logger
   // Add other global configs as needed (storage, vectors, telemetry, etc.)

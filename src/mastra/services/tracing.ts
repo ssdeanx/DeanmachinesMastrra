@@ -20,6 +20,26 @@ import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 const logger = createLogger({ name: 'opentelemetry-tracing', level: 'info' });
 
 /**
+ * Log with current trace context, preserving OTEL span attributes.
+ */
+export function logWithTraceContext(
+  target: Console | Record<string, (...args: any[]) => void>,
+  level: string,
+  message: string,
+  data?: Record<string, any>
+): void {
+  const fn = (target as any)[level];
+  if (typeof fn === "function") {
+    fn.call(target, message, data ?? {});
+  } else if (typeof (target as any).info === "function") {
+    // fallback to 'info'
+    (target as any).info(message, data ?? {});
+  } else {
+    console.log(message, data ?? {});
+  }
+}
+
+/**
  * Initialize OpenTelemetry SDK with auto-instrumentation for SigNoz
  * 
  * @param options - Configuration options for the OpenTelemetry SDK
