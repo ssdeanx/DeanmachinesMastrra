@@ -2,6 +2,10 @@
 lib/**/*.js
 lib/**/*.js.map
 
+.mastra/outputs/playground/**/*
+.mastra/outputs/playground/**/*.js
+.mastra/outputs/playground/assets/**/*
+.mastra/outputs/playground/assets/**/*.js
 # TypeScript v1 declaration files
 typings/
 
@@ -12,3 +16,13 @@ gcp-vertexai-credentials.json
 .env
 .env.development
 .mastra
+.vscode
+.mastra/*
+.mastra/**/*
+*.mastra
+*.mastra/**/*
+.mastra/output
+*.mastra/output/*
+*.mastra/output/**/*
+.mastra/outputs/playground
+*.mastra/outputs/playground/*

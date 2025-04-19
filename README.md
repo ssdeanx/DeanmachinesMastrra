@@ -10,6 +10,7 @@ Welcome to the **DeanMachines Mastra AI Workspace**! This monorepo contains the 
   - [Table of Contents](#table-of-contents)
   - [Project Overview](#project-overview)
   - [Workspace Structure](#workspace-structure)
+- [Directory Structure](#directory-structure)
   - [Key Concepts](#key-concepts)
   - [Architecture Overview (Mermaid)](#architecture-overview-mermaid)
   - [Agent-Tool-LLM Data Flow (Mermaid)](#agent-tool-llm-data-flow-mermaid)
@@ -68,6 +69,137 @@ functions/
 ├── CHANGELOG.md
 ├── README.md               # (This file)
 └── ...
+
+```
+
+# Directory Structure
+
+```bash
+.cursor/
+  mcp.json
+src/
+  mastra/
+    agents/
+      config/
+        agentic.config.ts
+        analyst.config.ts
+        architect.config.ts
+        codeDocumenter.config.ts
+        coder.config.ts
+        config.types.ts
+        copywriter.config.ts
+        dataManager.config.ts
+        debugger.config.ts
+        index.ts
+        marketResearch.config.ts
+        model.utils.ts
+        provider.utils.ts
+        research.config.ts
+        rlTrainer.config.ts
+        seoAgent.config.ts
+        socialMedia.config.ts
+        uiUxCoder.config.ts
+        writer.config.ts
+      agentic.agent.ts
+      analyst.agent.ts
+      architect.agent.ts
+      base.agent.ts
+      codeDocumenter.agent.ts
+      coder.agent.ts
+      copywriter.agent.ts
+      dataManager.agent.ts
+      debugger.agent.ts
+      index.ts
+      marketResearch.agent.ts
+      research.agent.ts
+      rlTrainer.agent.ts
+      seoAgent.agent.ts
+      socialMedia.agent.ts
+      uiUxCoder.agent.ts
+      writer.agent.ts
+    database/
+      examples.ts
+      index.ts
+      vector-store.ts
+    hooks/
+      index.ts
+    integrations/
+      index.ts
+    services/
+      exasearch.ts
+      hyperbrowser.ts
+      index.ts
+      langchain.ts
+      langfuse.ts
+      langsmith.ts
+      signoz.ts
+      tracing.ts
+      types.ts
+    tools/
+      ai-sdk.ts
+      arxiv.ts
+      bing-client.ts
+      brave-search.ts
+      calculator.ts
+      contentTools.ts
+      document-tools.ts
+      document.ts
+      e2b.ts
+      evals.ts
+      exasearch.ts
+      genkit.ts
+      github.ts
+      google-docs-client.ts
+      google-drive-client.ts
+      google-search.ts
+      graphRag.ts
+      hyper-functionCalls.ts
+      index.ts
+      jina-client.ts
+      llamaindex.ts
+      llmchain.ts
+      mastra.ts
+      mcp.ts
+      mcptools.ts
+      memoryQueryTool.ts
+      midjourney-client.ts
+      notion-client.ts
+      notion.ts
+      paginate.ts
+      readwrite.ts
+      rlFeedback.ts
+      rlReward.ts
+      stdlib.ts
+      tavily.ts
+      tracingTools.ts
+      types.ts
+      utils.ts
+      vectorquerytool.ts
+      wikibase.ts
+      wikidata-client.ts
+    utils/
+      index.ts
+      memory-diagnostics.ts
+      thread-manager.ts
+    voice/
+      elevenlabs.ts
+      googlevoice.ts
+      index.ts
+    workflows/
+      Networks/
+        agentNetwork.ts
+        knowledgeWorkMoE.network.ts
+        productLaunchNetwork.ts
+      index.ts
+      workflowFactory.ts
+    index.ts
+    types.ts
+.eslintrc.js
+.gitignore
+Agent-Fails.md
+CHANGELOG.md
+package.json
+README.md
 ```
 
 ---
@@ -433,3 +565,107 @@ Scaling/Performance       :        d3, 2025-04-22, 5d
 If you are a new contributor or AI assistant, please review this README and the codebase structure before making changes. For questions, contact the DeanMachines team or open an issue in the repository.
 
 ---
+
+```mermaid
+graph TD
+
+    subgraph 10848["External Systems"]
+        10905["File System<br>Local OS"]
+        10906["AI Frameworks<br>Genkit / LlamaIndex / LangChain"]
+        subgraph 10849["Multimedia Services"]
+            10903["Voice Services<br>Google Voice / ElevenLabs"]
+            10904["Image Generation Services<br>Midjourney"]
+        end
+        subgraph 10850["Execution & Automation"]
+            10901["Code Execution Services<br>E2B"]
+            10902["Web Automation Services<br>Hyperbrowser / Puppeteer"]
+        end
+        subgraph 10851["Data Sources & APIs"]
+            10894["Wikidata<br>External API"]
+            10895["Wikipedia<br>External API"]
+            10896["ArXiv<br>External API"]
+            10897["GitHub API<br>External API"]
+            10898["Google Workspace<br>External API (Docs/Drive)"]
+            10899["Notion API<br>External API"]
+            10900["Jina API<br>External API"]
+        end
+        subgraph 10852["Search APIs"]
+            10889["Tavily Search<br>External Service"]
+            10890["Google Custom Search<br>External Service"]
+            10891["Brave Search<br>External Service"]
+            10892["Exa Search<br>External Service"]
+            10893["Bing Search<br>External Service"]
+        end
+        subgraph 10853["Data Storage"]
+            10886["Vector Databases<br>Pinecone / Upstash Vector"]
+            10887["Relational Databases<br>LibSQL"]
+            10888["Key-Value Stores<br>Upstash Redis"]
+        end
+        subgraph 10854["Observability Platforms"]
+            10883["LangSmith<br>External Service"]
+            10884["Langfuse<br>External Service"]
+            10885["Signoz / OpenTelemetry<br>External Service"]
+        end
+        subgraph 10855["AI Providers"]
+            10879["Google AI<br>External Service (GenAI/Vertex)"]
+            10880["OpenAI<br>External Service"]
+            10881["Anthropic<br>External Service"]
+            10882["Ollama<br>External Service/Local"]
+        end
+    end
+    subgraph 10856["Mastra Core System"]
+        subgraph 10857["Service Integration"]
+            10875["Observability Service<br>TypeScript"]
+            10876["Database Interfaces<br>TypeScript"]
+            10877["Voice Service<br>TypeScript"]
+            10878["Integration Adapters<br>TypeScript"]
+        end
+        subgraph 10858["Tool Subsystem"]
+            10872["Tool Registry<br>TypeScript"]
+            10873["Core Tool Implementations<br>TypeScript"]
+            10874["External Tool Adapters<br>TypeScript"]
+        end
+        subgraph 10859["Workflow Subsystem"]
+            10870["Workflow Engine<br>TypeScript"]
+            10871["Agent Networks<br>TypeScript"]
+        end
+        subgraph 10860["Agent Subsystem"]
+            10866["Agent Registry<br>TypeScript"]
+            10867["Agent Base<br>TypeScript"]
+            10868["Agent Implementations<br>TypeScript"]
+            10869["Agent Configuration<br>TypeScript"]
+        end
+        subgraph 10861["Core Logic"]
+            10862["Mastra Entrypoint<br>TypeScript"]
+            10863["Core Types<br>TypeScript"]
+            10864["Utility Components<br>TypeScript"]
+            10865["Hook System<br>TypeScript"]
+        end
+    end
+    %% Edges at this level (grouped by source)
+    10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10894["Wikidata<br>External API"]
+    10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10895["Wikipedia<br>External API"]
+    10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10896["ArXiv<br>External API"]
+    10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10897["GitHub API<br>External API"]
+    10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10898["Google Workspace<br>External API (Docs/Drive)"]
+    10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10899["Notion API<br>External API"]
+    10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10900["Jina API<br>External API"]
+    10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10889["Tavily Search<br>External Service"]
+    10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10890["Google Custom Search<br>External Service"]
+    10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10891["Brave Search<br>External Service"]
+    10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10892["Exa Search<br>External Service"]
+    10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10893["Bing Search<br>External Service"]
+    10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10901["Code Execution Services<br>E2B"]
+    10874["External Tool Adapters<br>TypeScript"] -->|use| 10902["Web Automation Services<br>Hyperbrowser / Puppeteer"]
+    10874["External Tool Adapters<br>TypeScript"] -->|connect to| 10904["Image Generation Services<br>Midjourney"]
+    10874["External Tool Adapters<br>TypeScript"] -->|use| 10906["AI Frameworks<br>Genkit / LlamaIndex / LangChain"]
+    10873["Core Tool Implementations<br>TypeScript"] -->|interact with| 10905["File System<br>Local OS"]
+    10877["Voice Service<br>TypeScript"] -->|connect to| 10903["Voice Services<br>Google Voice / ElevenLabs"]
+    10876["Database Interfaces<br>TypeScript"] -->|connect to| 10886["Vector Databases<br>Pinecone / Upstash Vector"]
+    10876["Database Interfaces<br>TypeScript"] -->|connect to| 10887["Relational Databases<br>LibSQL"]
+    10876["Database Interfaces<br>TypeScript"] -->|connect to| 10888["Key-Value Stores<br>Upstash Redis"]
+    10875["Observability Service<br>TypeScript"] -->|sends data to| 10883["LangSmith<br>External Service"]
+    10875["Observability Service<br>TypeScript"] -->|sends data to| 10884["Langfuse<br>External Service"]
+    10875["Observability Service<br>TypeScript"] -->|sends data to| 10885["Signoz / OpenTelemetry<br>External Service"]
+    10878["Integration Adapters<br>TypeScript"] -->|connect to| 10897["GitHub API<br>External API"]
+```
