@@ -1,5 +1,5 @@
 import { UpstashTransport } from "@mastra/loggers/upstash";
- 
+
 const logger = createLogger({
   name: "Mastra",
   transports: {
