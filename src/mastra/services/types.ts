@@ -86,6 +86,7 @@ export interface OtelConfig {
     type: "otlp" | "console";
     endpoint?: string;
     headers?: Record<string, string>;
+    metricsInterval?: number;  // ← added: export interval in milliseconds for metrics
   };
 }
 

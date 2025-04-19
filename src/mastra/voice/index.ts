@@ -7,14 +7,14 @@
  */
 
 import { MastraVoice } from "@mastra/core/voice";
-import { createGoogleVoice } from "./googlevoice";
+import { createGoogleVoice, GoogleVoiceConfig } from "./googlevoice";
 import { createElevenLabsVoice } from "./elevenlabs";
 
 /**
  * Available voice provider types
  */
 export enum VoiceProvider {
-  GOOGLE = "google",
+  GOOGLE     = "google",
   ELEVENLABS = "elevenlabs",
 }
 
@@ -29,34 +29,33 @@ export interface VoiceConfig {
   /** Default speaker ID */
   speaker?: string;
   /** Provider-specific options */
-  options?: Record<string, unknown>;
+  options?: Partial<GoogleVoiceConfig>;
 }
 
 /**
  * Create a voice provider based on the specified configuration
  *
- * @param config - Voice provider configuration
+ * @param cfg - Voice provider configuration
  * @returns Configured voice provider instance
  * @throws Error if the specified provider is not supported
  */
-export function createVoice(config: VoiceConfig): MastraVoice {
-  switch (config.provider) {
+export function createVoice(cfg: VoiceConfig): MastraVoice {
+  switch (cfg.provider) {
     case VoiceProvider.GOOGLE:
       return createGoogleVoice({
-        apiKey: config.apiKey,
-        speaker: config.speaker,
-        ...(config.options as any),
+        apiKey:  cfg.apiKey,
+        speaker: cfg.speaker,
+        ...(cfg.options as GoogleVoiceConfig),
       });
-
     case VoiceProvider.ELEVENLABS:
       return createElevenLabsVoice({
-        apiKey: config.apiKey,
-        speaker: config.speaker,
-        modelName: (config.options as any)?.modelName,
+        apiKey: cfg.apiKey,
+        speaker: cfg.speaker,
+        // Pass provider-specific options if they exist
+        ...cfg.options
       });
-
     default:
-      throw new Error(`Unsupported voice provider: ${config.provider}`);
+      throw new Error(`Unsupported voice provider: ${cfg.provider}`);
   }
 }
 
@@ -78,9 +77,7 @@ export function getElevenLabsVoice(): MastraVoice {
   return createElevenLabsVoice();
 }
 
-// Export all voice-related functions and types
-export { createGoogleVoice } from "./googlevoice";
+// Re-export the low-level factories & types
+export { createGoogleVoice, GoogleVoiceConfig } from "./googlevoice";
 export { createElevenLabsVoice } from "./elevenlabs";
-
-// Re-export the MastraVoice type for external use
 export type { MastraVoice };

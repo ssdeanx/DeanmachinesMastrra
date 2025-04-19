@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.0.11] - 2025-04-19 12:00 UTC
+
+### Added
+
+- **fileLogger.ts**  
+  • Switched to `fs‑extra` (`ensureDirSync`/`ensureFileSync`) so `logs/mastra.log` is created automatically.  
+  • Retains full JSON‑line format and log levels.
+
+- **upstashLog.ts**  
+  • Exposed `createUpstashLogger()` factory and `upstashLogger` default instance.  
+  • Normalizes the Redis REST URL with `https://` to satisfy `new URL()`.  
+  • Re‑exports `UpstashTransport` for advanced use.
+
+- **consoleLogger.ts**  
+  • Simple in‑process console transport with `debug`/`info`/`warn`/`error` and timestamped prefixes.
+
+- **tracing.ts & signoz.ts**  
+  • `initializeDefaultTracing()` auto‑instruments Node + graceful shutdown.  
+  • `initSigNoz()` configures OTLP exporter, tracer + meter, periodic metric reader.
+
+- **base.agent.ts**  
+  • Imported and wired:
+    - `consoleLogger`, `upstashLogger`, `fileLogger` under a unified `logger` API.  
+    - OpenTelemetry via `initializeDefaultTracing()`.  
+    - SigNoz tracer + meter via `initSigNoz()`.  
+  • Created spans around agent lifecycle (`agent.create`, `agent.debug/info/warn/error`).  
+  • Recorded metrics (`agent.creation.count`, `agent.creation.latency_ms`).  
+  • **Voice integration is stubbed**—the `createGoogleVoice()` import and `voice` prop in the `Agent` constructor are commented out because real‑time streaming (connect, listen, speaker events) is not yet implemented.  
+
+- **voice/googlevoice.ts & voice/index.ts**  
+  • Exposed `createGoogleVoice()` and barrel‑exported from `index.ts`.  
+  • Configured `CompositeVoice` with tool injection and global instructions.  
+  • Did **not** hook into BaseAgent because real‑time support is pending.
+
+### Fixed
+
+- Avoid “File path does not exist” by auto‑creating directories/files in `fileLogger.ts`.  
+- Prevent `ERR_INVALID_URL` in Upstash by prefixing missing `https://`.
+
+### Notes
+
+- Voice support is **half‑complete**. All voice factory code is in place, but in `base.agent.ts` it remains commented out.  
+- **Next steps**:
+  1. Wire a real‑time STT/TTS provider (e.g. Google streaming API).  
+  2. Hook up `voice.connect()`, `voice.on("listen")`, `voice.on("speaker")`.  
+  3. Pass the active `voice` instance into the `Agent` constructor.  
+  4. Un‑comment the `voice` lines and verify end‑to‑end audio streaming.
+
 ## [v0.0.10] - 2025-04-16
 
 ### Added
@@ -169,7 +217,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed throttle type mismatches and replaced unsupported string methods for broader TypeScript compatibility.
 - Lint and type errors resolved across all affected files.
 
-## [0.0.2] - 2025-04-14
+## [v0.0.2] - 2025-04-14
 
 ### Added
 
@@ -192,7 +240,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated dependencies to address potential vulnerabilities
 
-## [0.0.1] - 2025-04-01
+## [v0.0.1] - 2025-04-01
 
 ### Added
 

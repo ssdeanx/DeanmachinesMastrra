@@ -1,35 +1,26 @@
 /**
- * Google Voice implementation for Mastra
+ * Rich Google Voice implementation for Mastra
  *
  * This module provides text-to-speech and speech-to-text capabilities
  * using Google Cloud services with the Mastra voice interface.
  */
 
-import { MastraVoice } from "@mastra/core/voice";
-import { GoogleVoice as GoogleVoiceProvider } from "@mastra/voice-google";
+import { CompositeVoice, MastraVoice } from "@mastra/core/voice";
+import { GoogleVoice } from "@mastra/voice-google";
+import { allToolsMap } from "../tools";
 
 /**
  * Interface for Google voice configuration options
  */
-interface GoogleVoiceConfig {
-  /** API key for Google Cloud services */
+export interface GoogleVoiceConfig {
+  /** Google Cloud API key or path to credentials JSON */
   apiKey?: string;
-  /** Default speaker/voice ID */
+  /** Default voice name for TTS (e.g. "en-US-Wavenet-D") */
   speaker?: string;
-  /** Options for speech-to-text model */
-  listeningOptions?: {
-    /** Language code for speech recognition */
-    languageCode?: string;
-    /** Audio encoding format */
-    encoding?: string;
-  };
-  /** Options for text-to-speech model */
-  speechOptions?: {
-    /** Language code for speech synthesis */
-    languageCode?: string;
-    /** Audio encoding format */
-    audioEncoding?: string;
-  };
+  /** Model name for TTS */
+  ttsModel?: string;
+  /** Model name for STT */
+  sttModel?: string;
 }
 
 /**
@@ -39,20 +30,35 @@ interface GoogleVoiceConfig {
  * @returns Configured Google voice provider instance
  * @throws Error if required environment variables are missing
  */
-export function createGoogleVoice(config: GoogleVoiceConfig = {}): MastraVoice {
-  const apiKey = config.apiKey || process.env.GOOGLE_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("Google API key is required. Set GOOGLE_API_KEY environment variable or pass apiKey in config.");
+export function createGoogleVoice({
+  apiKey,
+  speaker = "en-US-Wavenet-D",
+  ttsModel = "default",
+  sttModel = "default",
+}: GoogleVoiceConfig = {}): MastraVoice {
+  const key = apiKey || process.env.GOOGLE_API_KEY;
+  if (!key) {
+    throw new Error(
+      "GoogleVoice requires an API key—set GOOGLE_API_KEY or pass apiKey"
+    );
   }
 
-  return new GoogleVoiceProvider({
-    speechModel: {
-      apiKey,
-    },
-    listeningModel: {
-      apiKey,
-    },
-    speaker: config.speaker || 'en-US-Casual-K',
-  });
+  const speechModel = { apiKey: key, model: ttsModel };
+  const listeningModel = { apiKey: key, model: sttModel };
+
+  // instantiate low‑level GoogleVoice (only known props)
+  const provider = new GoogleVoice({ speechModel, listeningModel, speaker });
+
+  // composite gives you .speak(), .listen(), .getSpeakers(), .send(), .answer(), .on(), .off(), .close()
+  const voice = new CompositeVoice({ speakProvider: provider, listenProvider: provider });
+
+  // inject all of your Agent tools into the voice context
+// auto‑add your Agent tools into the voice context
+voice.addTools(Object.fromEntries(allToolsMap.entries()));
+  // add any global voice instructions
+  voice.addInstructions(
+    "You are the DeanMachines AI assistant. Respond vocally and use your tools to help."
+  );
+
+  return voice;
 }

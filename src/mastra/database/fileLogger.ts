@@ -1,61 +1,53 @@
+import { ensureDirSync, ensureFileSync } from "fs-extra";
+import path from "path";
 import { FileTransport } from "@mastra/loggers/file";
- 
-const fileLogger = createLogger({
-  name: "Mastra",
-  transports: { file: new FileTransport({ path: "test-dir/mastra.log" }) },
-  level: "info",
-});
-function createLogger({ name, transports, level }: { name: string; transports: { file: FileTransport }; level: string }) {
-    return {
-        warn: (message: string, meta?: Record<string, any>) => {
-            const entry = {
-                message,
-                ...meta,
-                logger: name,
-                level: "warn",
-                timestamp: new Date().toISOString(),
-            };
-            transports.file.write(JSON.stringify(entry) + "\n");
-        },
-        info: (message: string, meta?: Record<string, any>) => {
-            const entry = {
-                message,
-                ...meta,
-                logger: name,
-                level: "info",
-                timestamp: new Date().toISOString(),
-            };
-            transports.file.write(JSON.stringify(entry) + "\n");
-        },
-        error: (message: string, meta?: Record<string, any>) => {
-            const entry = {
-                message,
-                ...meta,
-                logger: name,
-                level: "error",
-                timestamp: new Date().toISOString(),
-            };
-            transports.file.write(JSON.stringify(entry) + "\n");
-        },
-        debug: (message: string, meta?: Record<string, any>) => {
-            const entry = {
-                message,
-                ...meta,
-                logger: name,
-                level: "debug",
-                timestamp: new Date().toISOString(),
-            };
-            transports.file.write(JSON.stringify(entry) + "\n");
-        },
-        // You can add more log levels (info, error, etc.) as needed
-    };
-}
-// Export the logger instance for external use
-// This allows you to use the logger directly if needed
-export const fileLoggerInstance = fileLogger;
 
-// Export the logger instance for external use
-export default fileLoggerInstance;
-// Export the FileTransport for external use
-// This allows you to use the FileTransport directly if needed
+export interface FileLoggerOptions {
+  name: string;
+  level?: "debug" | "info" | "warn" | "error";
+  path: string;
+}
+
+export function createFileLogger({
+  name,
+  level = "info",
+  path: filePath,
+}: FileLoggerOptions) {
+  // ensure parent folder exists (and file)
+  const dir = path.dirname(filePath);
+  ensureDirSync(dir);
+  ensureFileSync(filePath);
+
+  const transport = new FileTransport({ path: filePath });
+  function write(levelName: string, message: string, meta?: Record<string, any>) {
+    const entry = {
+      message,
+      level: levelName,
+      logger: name,
+      timestamp: new Date().toISOString(),
+      ...meta,
+    };
+    transport.write(JSON.stringify(entry) + "\n");
+  }
+
+  return {
+    debug: (msg: string, meta?: Record<string, any>) =>
+      level === "debug" && write("debug", msg, meta),
+    info:  (msg: string, meta?: Record<string, any>) =>
+      ["info","debug"].includes(level) && write("info", msg, meta),
+    warn:  (msg: string, meta?: Record<string, any>) =>
+      ["warn","info","debug"].includes(level) && write("warn", msg, meta),
+    error: (msg: string, meta?: Record<string, any>) =>
+      write("error", msg, meta),
+  };
+}
+
+// default instance
+export const fileLogger = createFileLogger({
+  name: "Mastra",
+  level: process.env.LOG_LEVEL as any || "info",
+  path: "./logs/mastra.log",
+});
+
+export default fileLogger;
 export { FileTransport };

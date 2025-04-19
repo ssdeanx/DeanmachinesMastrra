@@ -5,11 +5,25 @@ import { checkEvalStorageFields } from '@mastra/core/utils';
 import { Mastra, isVercelTool } from '@mastra/core';
 import { createLogger } from '@mastra/core/logger';
 import { Agent } from '@mastra/core/agent';
+import { UpstashTransport } from '@mastra/loggers/upstash';
+import * as fs from 'fs-extra';
+import fs__default, { ensureDirSync, ensureFileSync } from 'fs-extra';
+import path, { resolve, extname, dirname, join } from 'path';
+import { FileTransport } from '@mastra/loggers/file';
+import process$1, { env } from 'process';
 import * as api from '@opentelemetry/api';
 import { trace, context, SpanStatusCode as SpanStatusCode$1 } from '@opentelemetry/api';
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import { resourceFromAttributes } from '@opentelemetry/resources';
+import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { BatchSpanProcessor, SimpleSpanProcessor, ConsoleSpanExporter } from '@opentelemetry/sdk-trace-base';
+import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-proto';
+import { PeriodicExportingMetricReader, MeterProvider } from '@opentelemetry/sdk-metrics';
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { z, ZodType, ZodFirstPartyTypeKind, ZodOptional } from 'zod';
 import { Langfuse } from 'langfuse';
-import process$1, { env } from 'process';
 import { createTool } from '@mastra/core/tools';
 import { google } from '@ai-sdk/google';
 import { encodingForModel } from 'js-tiktoken';
@@ -22,18 +36,10 @@ import { TavilyClient } from '@agentic/tavily';
 import { aiFunction, AIFunctionsProvider, AIFunctionSet, asZodOrJsonSchema, sanitizeSearchParams, pruneEmpty, assert, getEnv, throttleKy, createAIFunction } from '@agentic/core';
 import { createMastraTools } from '@agentic/mastra';
 import Exa from 'exa-js';
-import * as fs from 'fs-extra';
-import fs__default from 'fs-extra';
-import { resolve, extname, dirname, join } from 'path';
 import { Client } from 'langsmith';
 import { v4 } from 'uuid';
 import { LibSQLStore } from '@mastra/core/storage/libsql';
 import { Memory } from '@mastra/memory';
-import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
-import { resourceFromAttributes } from '@opentelemetry/resources';
-import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { BatchSpanProcessor, SimpleSpanProcessor, ConsoleSpanExporter } from '@opentelemetry/sdk-trace-base';
 import crypto, { randomUUID } from 'crypto';
 import { vertex } from '@ai-sdk/google-vertex';
 import { openai } from '@ai-sdk/openai';
@@ -55,11 +61,8 @@ import { PineconeStore } from '@langchain/pinecone';
 import { Document } from 'langchain/document';
 import { ChatOpenAI } from '@langchain/openai';
 import { ChatAnthropic } from '@langchain/anthropic';
-import { PromptTemplate } from '@langchain/core/prompts';
 import { Octokit } from 'octokit';
 import { GithubIntegration } from '@mastra/github';
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { Workflow, Step } from '@mastra/core/workflows';
 import { AgentNetwork } from '@mastra/core/network';
 import { readFile } from 'fs/promises';
@@ -68,6 +71,309 @@ import { createServer } from 'http';
 import { Http2ServerRequest } from 'http2';
 import { Readable } from 'stream';
 import { createReadStream, lstatSync } from 'fs';
+
+function createUpstashLogger({
+  name,
+  level = "info",
+  listName,
+  upstashUrl,
+  upstashToken
+}) {
+  const baseUrl = upstashUrl.match(/^https?:\/\//) ? upstashUrl : `https://${upstashUrl}`;
+  const transport = new UpstashTransport({
+    listName,
+    upstashUrl: baseUrl,
+    upstashToken
+  });
+  function write(levelName, log) {
+    if (level === "debug" || level === "info" && levelName !== "debug" || level === "warn" && ["warn", "error"].includes(levelName) || level === "error" && levelName === "error") {
+      transport.logBuffer.push({
+        ...log,
+        level: levelName,
+        logger: name,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      transport._flush?.();
+    }
+  }
+  return {
+    debug: (log) => write("debug", log),
+    info: (log) => write("info", log),
+    warn: (log) => write("warn", log),
+    error: (log) => write("error", log)
+  };
+}
+const upstashLogger = createUpstashLogger({
+  name: "Mastra",
+  level: process.env.LOG_LEVEL || "info",
+  listName: "production-logs",
+  upstashUrl: process.env.UPSTASH_REDIS_REST_URL,
+  upstashToken: process.env.UPSTASH_REDIS_REST_TOKEN
+});
+
+function createFileLogger({
+  name,
+  level = "info",
+  path: filePath
+}) {
+  const dir = path.dirname(filePath);
+  ensureDirSync(dir);
+  ensureFileSync(filePath);
+  const transport = new FileTransport({ path: filePath });
+  function write(levelName, message, meta) {
+    const entry = {
+      message,
+      level: levelName,
+      logger: name,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      ...meta
+    };
+    transport.write(JSON.stringify(entry) + "\n");
+  }
+  return {
+    debug: (msg, meta) => level === "debug" && write("debug", msg, meta),
+    info: (msg, meta) => ["info", "debug"].includes(level) && write("info", msg, meta),
+    warn: (msg, meta) => ["warn", "info", "debug"].includes(level) && write("warn", msg, meta),
+    error: (msg, meta) => write("error", msg, meta)
+  };
+}
+const fileLogger = createFileLogger({
+  name: "Mastra",
+  level: process.env.LOG_LEVEL || "info",
+  path: "./logs/mastra.log"
+});
+
+const { SpanStatusCode } = api;
+const OTelAttributeNames = {
+  PROMPT_TOKENS: "ai.prompt.tokens",
+  COMPLETION_TOKENS: "ai.completion.tokens",
+  TOTAL_TOKENS: "ai.tokens.total",
+  LATENCY_MS: "ai.latency.ms"};
+
+const logger$r = createLogger({ name: "signoz-service", level: "info" });
+let tracerProvider = null;
+let tracer = null;
+function initSigNoz(config) {
+  if (config.enabled === false) {
+    logger$r.info("SigNoz tracing is disabled");
+    return { tracer: null, meter: null };
+  }
+  if (tracer) {
+    return { tracer, meter: null };
+  }
+  try {
+    const serviceName = config.serviceName || "deanmachines-ai";
+    const endpoint = config.export?.endpoint || env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces";
+    const headers = config.export?.headers || {};
+    logger$r.info(`Initializing SigNoz tracing for service: ${serviceName}`, { endpoint });
+    const resource = resourceFromAttributes({
+      [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
+      [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: env.NODE_ENV || "development"
+    });
+    const otlpExporter = new OTLPTraceExporter({
+      url: endpoint,
+      headers
+    });
+    const processors = [];
+    processors.push(new BatchSpanProcessor(otlpExporter));
+    if (env.NODE_ENV !== "production") {
+      processors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
+      logger$r.debug("Added console span exporter for debugging");
+    }
+    tracerProvider = new NodeTracerProvider({
+      resource,
+      spanProcessors: processors
+    });
+    tracerProvider.register();
+    tracer = api.trace.getTracer("deanmachines-tracer");
+    logger$r.info("SigNoz tracing initialized successfully");
+    const metricExporter = new OTLPMetricExporter({
+      url: env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT || endpoint.replace("/v1/traces", "/v1/metrics"),
+      headers
+    });
+    const metricReader = new PeriodicExportingMetricReader({
+      exporter: metricExporter,
+      exportIntervalMillis: config.export?.metricsInterval ?? 6e4
+    });
+    const meterProvider = new MeterProvider({
+      resource,
+      views: [],
+      // add any custom views here
+      readers: [metricReader]
+    });
+    if (env.NODE_ENV !== "production") {
+      logger$r.debug("SigNoz metrics exporter configured");
+    }
+    return { tracer, meter: meterProvider };
+  } catch (error) {
+    logger$r.error("Failed to initialize SigNoz tracing", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : void 0
+    });
+    return { tracer: null, meter: null };
+  }
+}
+function getTracer() {
+  if (!tracer) {
+    throw new Error("SigNoz tracing has not been initialized. Call initSigNoz first.");
+  }
+  return tracer;
+}
+function createAISpan(name, attributes = {}) {
+  if (!tracer) {
+    logger$r.warn("Creating span without initialized SigNoz tracing");
+    return api.trace.getTracer("no-op").startSpan(name);
+  }
+  return tracer.startSpan(name, {
+    attributes: {
+      "ai.operation": name,
+      ...attributes
+    }
+  });
+}
+function recordLlmMetrics(span, tokenInfo, latencyMs) {
+  if (!span) return;
+  if (tokenInfo?.promptTokens !== void 0) {
+    span.setAttribute(OTelAttributeNames.PROMPT_TOKENS, tokenInfo.promptTokens);
+  }
+  if (tokenInfo?.completionTokens !== void 0) {
+    span.setAttribute(OTelAttributeNames.COMPLETION_TOKENS, tokenInfo.completionTokens);
+  }
+  if (tokenInfo?.totalTokens !== void 0) {
+    span.setAttribute(OTelAttributeNames.TOTAL_TOKENS, tokenInfo.totalTokens);
+  }
+  if (latencyMs !== void 0) {
+    span.setAttribute(OTelAttributeNames.LATENCY_MS, latencyMs);
+  }
+}
+function recordMetrics(span, metrics) {
+  if (!span) return;
+  if (metrics.tokens !== void 0) {
+    span.setAttribute(OTelAttributeNames.TOTAL_TOKENS, metrics.tokens);
+  }
+  if (metrics.latencyMs !== void 0) {
+    span.setAttribute(OTelAttributeNames.LATENCY_MS, metrics.latencyMs);
+  }
+  if (metrics.status === "error" && metrics.errorMessage) {
+    span.setStatus({
+      code: SpanStatusCode.ERROR,
+      message: metrics.errorMessage
+    });
+  } else {
+    span.setStatus({
+      code: SpanStatusCode.OK
+    });
+  }
+}
+function createHttpSpan(method, url, attributes = {}) {
+  if (!tracer) {
+    return api.trace.getTracer("no-op").startSpan(`HTTP ${method}`);
+  }
+  try {
+    const urlObj = new URL(url);
+    return tracer.startSpan(`HTTP ${method}`, {
+      attributes: {
+        "http.method": method,
+        "http.url": url,
+        "http.host": urlObj.host,
+        "http.scheme": urlObj.protocol.replace(":", ""),
+        "http.target": urlObj.pathname,
+        ...attributes
+      }
+    });
+  } catch (error) {
+    return tracer.startSpan(`HTTP ${method}`, {
+      attributes: {
+        "http.method": method,
+        "http.url": url,
+        ...attributes
+      }
+    });
+  }
+}
+var signoz = {
+  init: initSigNoz,
+  getTracer,
+  createSpan: createAISpan,
+  createHttpSpan,
+  recordLlmMetrics,
+  recordMetrics,
+  shutdown: async () => {
+    if (tracerProvider) await tracerProvider.shutdown();
+  }
+};
+
+const logger$q = createLogger({ name: "opentelemetry-tracing", level: "info" });
+function initOpenTelemetry({
+  serviceName = "deanmachines-ai",
+  serviceVersion = "1.0.0",
+  environment = "development",
+  enabled = true,
+  endpoint,
+  metricsEnabled = true,
+  metricsIntervalMs = 6e4
+}) {
+  if (!enabled) {
+    logger$q.info("OpenTelemetry tracing is disabled");
+    return null;
+  }
+  const exporterUrl = endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4317/v1/traces";
+  const traceExporter = new OTLPTraceExporter({ url: exporterUrl });
+  const resource = resourceFromAttributes({
+    [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
+    [SemanticResourceAttributes.SERVICE_VERSION]: serviceVersion,
+    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: environment
+  });
+  const sdkConfig = {
+    resource,
+    traceExporter,
+    instrumentations: [getNodeAutoInstrumentations()]
+  };
+  if (metricsEnabled) {
+    const metricExporter = new OTLPMetricExporter({
+      url: exporterUrl.replace("/v1/traces", "/v1/metrics")
+    });
+    const metricReader = new PeriodicExportingMetricReader({
+      exporter: metricExporter,
+      exportIntervalMillis: metricsIntervalMs
+    });
+    sdkConfig.metricReader = metricReader;
+    logger$q.info("OpenTelemetry metrics enabled");
+  }
+  const sdk = new NodeSDK(sdkConfig);
+  try {
+    sdk.start();
+    logger$q.info("OpenTelemetry SDK initialized successfully");
+  } catch (initError) {
+    logger$q.error("Error initializing OpenTelemetry SDK", {
+      error: initError instanceof Error ? initError.message : String(initError)
+    });
+  }
+  process$1.on("SIGTERM", async () => {
+    try {
+      await sdk.shutdown();
+      logger$q.info("OpenTelemetry SDK shut down successfully");
+    } catch (shutdownError) {
+      logger$q.error("Error shutting down OpenTelemetry SDK", {
+        error: shutdownError instanceof Error ? shutdownError.message : String(shutdownError)
+      });
+    } finally {
+      process$1.exit(0);
+    }
+  });
+  return sdk;
+}
+let sdkInstance = null;
+function initializeDefaultTracing() {
+  if (!sdkInstance) {
+    sdkInstance = initOpenTelemetry({
+      serviceName: process$1.env.OTEL_SERVICE_NAME || "deanmachines-ai",
+      environment: process$1.env.NODE_ENV || "development",
+      enabled: process$1.env.ENABLE_OPENTELEMETRY !== "false"
+    });
+  }
+  return sdkInstance;
+}
 
 const DEFAULT_MAX_TOKENS = 8192;
 const DEFAULT_MODELS = {
@@ -2279,7 +2585,7 @@ z.object({
   ).optional().describe("Recommendations for further improvements")
 });
 
-const logger$s = createLogger({ name: "langfuse-service", level: "info" });
+const logger$p = createLogger({ name: "langfuse-service", level: "info" });
 const envSchema$2 = z.object({
   LANGFUSE_PUBLIC_KEY: z.string().min(1, "Langfuse public key is required"),
   LANGFUSE_SECRET_KEY: z.string().min(1, "Langfuse secret key is required"),
@@ -2292,12 +2598,12 @@ function validateEnv() {
     if (error instanceof z.ZodError) {
       const missingKeys = error.errors.filter((e) => e.code === "invalid_type" && e.received === "undefined").map((e) => e.path.join("."));
       if (missingKeys.length > 0) {
-        logger$s.error(
+        logger$p.error(
           `Missing required environment variables: ${missingKeys.join(", ")}`
         );
       }
     }
-    logger$s.error("Langfuse environment validation failed:", { error });
+    logger$p.error("Langfuse environment validation failed:", { error });
     throw new Error(
       `Langfuse service configuration error: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -2312,7 +2618,7 @@ function createLangfuseClient() {
       baseUrl: validatedEnv$1.LANGFUSE_HOST
     });
   } catch (error) {
-    logger$s.error("Failed to create Langfuse client:", { error });
+    logger$p.error("Failed to create Langfuse client:", { error });
     throw new Error(
       `Langfuse client creation failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -2333,10 +2639,10 @@ class LangfuseService {
    */
   createTrace(name, options) {
     try {
-      logger$s.debug("Creating Langfuse trace", { name, ...options });
+      logger$p.debug("Creating Langfuse trace", { name, ...options });
       return this.client.trace({ name, ...options });
     } catch (error) {
-      logger$s.error("Error creating trace:", { error, name });
+      logger$p.error("Error creating trace:", { error, name });
       throw new Error(`Failed to create Langfuse trace: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2349,10 +2655,10 @@ class LangfuseService {
    */
   createSpan(name, options) {
     try {
-      logger$s.debug("Creating Langfuse span", { name, ...options });
+      logger$p.debug("Creating Langfuse span", { name, ...options });
       return this.client.span({ name, ...options });
     } catch (error) {
-      logger$s.error("Error creating span:", { error, name });
+      logger$p.error("Error creating span:", { error, name });
       throw new Error(`Failed to create Langfuse span: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2365,10 +2671,10 @@ class LangfuseService {
    */
   logGeneration(name, options) {
     try {
-      logger$s.debug("Logging Langfuse generation", { name, ...options });
+      logger$p.debug("Logging Langfuse generation", { name, ...options });
       return this.client.generation({ name, ...options });
     } catch (error) {
-      logger$s.error("Error logging generation:", { error, name });
+      logger$p.error("Error logging generation:", { error, name });
       throw new Error(`Failed to log Langfuse generation: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2381,13 +2687,13 @@ class LangfuseService {
    */
   createScore(options) {
     try {
-      logger$s.debug("Creating Langfuse score", options);
+      logger$p.debug("Creating Langfuse score", options);
       if (!options.traceId && !options.spanId && !options.generationId) {
         throw new Error("At least one of traceId, spanId, or generationId must be provided");
       }
       return this.client.score(options);
     } catch (error) {
-      logger$s.error("Error creating score:", { error, name: options.name });
+      logger$p.error("Error creating score:", { error, name: options.name });
       throw new Error(`Failed to create Langfuse score: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2399,16 +2705,16 @@ class LangfuseService {
   async flush() {
     try {
       await this.client.flush();
-      logger$s.debug("Flushed Langfuse events");
+      logger$p.debug("Flushed Langfuse events");
     } catch (error) {
-      logger$s.error("Error flushing Langfuse events:", { error });
+      logger$p.error("Error flushing Langfuse events:", { error });
       throw new Error(`Failed to flush Langfuse events: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
 const langfuse = new LangfuseService();
 
-const logger$r = createLogger({ name: "mastra-hooks", level: "debug" });
+const logger$o = createLogger({ name: "mastra-hooks", level: "debug" });
 function createResponseHook(config = {}) {
   const {
     minResponseLength = 10,
@@ -2423,7 +2729,7 @@ function createResponseHook(config = {}) {
       const currentSpan = trace.getSpan(currentContext);
       const traceId = currentSpan?.spanContext().traceId;
       const spanId = currentSpan?.spanContext().spanId;
-      logger$r.debug(`Response hook executing (attempt ${attempt}/${maxAttempts})`, {
+      logger$o.debug(`Response hook executing (attempt ${attempt}/${maxAttempts})`, {
         traceId,
         spanId,
         hasText: !!response.text,
@@ -2438,7 +2744,7 @@ function createResponseHook(config = {}) {
             comment: `Response validation attempt ${attempt}/${maxAttempts}`
           });
         } catch (err) {
-          logger$r.warn("Failed to record validation in Langfuse", { error: err });
+          logger$o.warn("Failed to record validation in Langfuse", { error: err });
         }
       }
       if (validateResponse(response)) {
@@ -2456,10 +2762,10 @@ function createResponseHook(config = {}) {
             hookSpan.setAttribute("response.attempt", attempt);
             hookSpan.end();
           }
-          logger$r.info(`Empty response, retrying (${attempt}/${maxAttempts})`);
+          logger$o.info(`Empty response, retrying (${attempt}/${maxAttempts})`);
           return onResponse(response, attempt + 1);
         }
-        logger$r.warn(`Maximum retry attempts reached (${maxAttempts})`);
+        logger$o.warn(`Maximum retry attempts reached (${maxAttempts})`);
         if (hookSpan) {
           hookSpan.setStatus({
             code: SpanStatusCode$1.ERROR,
@@ -2473,7 +2779,7 @@ function createResponseHook(config = {}) {
         };
       }
       if (response.text && response.text.length < minResponseLength) {
-        logger$r.debug(`Response too short (${response.text.length} < ${minResponseLength}), adding suggestion for elaboration`);
+        logger$o.debug(`Response too short (${response.text.length} < ${minResponseLength}), adding suggestion for elaboration`);
         if (hookSpan) {
           hookSpan.setAttribute("response.tooShort", true);
           hookSpan.setAttribute("response.length", response.text.length);
@@ -2490,7 +2796,7 @@ function createResponseHook(config = {}) {
       }
       return response;
     } catch (error) {
-      logger$r.error("Response hook error:", { error });
+      logger$o.error("Response hook error:", { error });
       if (hookSpan) {
         hookSpan.setStatus({
           code: SpanStatusCode$1.ERROR,
@@ -2567,7 +2873,7 @@ function createEmbeddings(apiKey, modelName) {
   });
 }
 
-const logger$q = createLogger({ name: "vector-query-tool", level: "info" });
+const logger$n = createLogger({ name: "vector-query-tool", level: "info" });
 const envSchema$1 = z.object({
   GOOGLE_AI_API_KEY: z.string().min(1, "Google AI API key is required"),
   PINECONE_INDEX: z.string().default("Default"),
@@ -2578,7 +2884,7 @@ const validatedEnv = (() => {
   try {
     return envSchema$1.parse(env);
   } catch (error) {
-    logger$q.error("Environment validation failed:", { error });
+    logger$n.error("Environment validation failed:", { error });
     throw new Error(
       `Vector query tool configuration error: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -2593,12 +2899,12 @@ function createMastraVectorQueryTool(config = {}) {
     const dimensions = config.dimensions || validatedEnv.PINECONE_DIMENSION;
     const apiKey = config.apiKey || validatedEnv.GOOGLE_AI_API_KEY;
     const topK = config.topK || 5;
-    logger$q.info(
+    logger$n.info(
       `Creating vector query tool for ${vectorStoreName}:${indexName}`
     );
     let embeddingModel;
     if (embeddingProvider === "tiktoken") {
-      logger$q.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
+      logger$n.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
       const tiktokenAdapter = {
         specificationVersion: "v1",
         provider: "tiktoken",
@@ -2622,7 +2928,7 @@ function createMastraVectorQueryTool(config = {}) {
             }
             return { embeddings: [{ embedding }] };
           } catch (error) {
-            logger$q.error("Tiktoken embedding error:", { error });
+            logger$n.error("Tiktoken embedding error:", { error });
             throw new Error(
               `Tiktoken embedding failed: ${error instanceof Error ? error.message : String(error)}`
             );
@@ -2652,7 +2958,7 @@ function createMastraVectorQueryTool(config = {}) {
       };
       embeddingModel = tiktokenAdapter;
     } else {
-      logger$q.info("Using Google embeddings");
+      logger$n.info("Using Google embeddings");
       embeddingModel = createEmbeddings(
         apiKey,
         "models/gemini-embedding-exp-03-07"
@@ -2680,10 +2986,10 @@ function createMastraVectorQueryTool(config = {}) {
       description,
       enableFilter: config.enableFilters
     });
-    logger$q.info(`Vector query tool created: ${toolId}`);
+    logger$n.info(`Vector query tool created: ${toolId}`);
     return tool;
   } catch (error) {
-    logger$q.error("Failed to create vector query tool:", { error });
+    logger$n.error("Failed to create vector query tool:", { error });
     throw new Error(
       `Vector query tool creation failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -3777,159 +4083,7 @@ const listFilesTool = createTool({
   }
 });
 
-const { SpanStatusCode } = api;
-const OTelAttributeNames = {
-  PROMPT_TOKENS: "ai.prompt.tokens",
-  COMPLETION_TOKENS: "ai.completion.tokens",
-  TOTAL_TOKENS: "ai.tokens.total",
-  LATENCY_MS: "ai.latency.ms"};
-
-const logger$p = createLogger({ name: "signoz-service", level: "info" });
-let tracerProvider = null;
-let tracer = null;
-function initSigNoz(config) {
-  if (config.enabled === false) {
-    logger$p.info("SigNoz tracing is disabled");
-    return null;
-  }
-  if (tracer) {
-    return tracer;
-  }
-  try {
-    const serviceName = config.serviceName || "deanmachines-ai";
-    const endpoint = config.export?.endpoint || env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces";
-    const headers = config.export?.headers || {};
-    logger$p.info(`Initializing SigNoz tracing for service: ${serviceName}`, { endpoint });
-    const resource = resourceFromAttributes({
-      [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
-      [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: env.NODE_ENV || "development"
-    });
-    const otlpExporter = new OTLPTraceExporter({
-      url: endpoint,
-      headers
-    });
-    const processors = [];
-    processors.push(new BatchSpanProcessor(otlpExporter));
-    if (env.NODE_ENV !== "production") {
-      processors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
-      logger$p.debug("Added console span exporter for debugging");
-    }
-    tracerProvider = new NodeTracerProvider({
-      resource,
-      spanProcessors: processors
-    });
-    tracerProvider.register();
-    tracer = api.trace.getTracer("deanmachines-tracer");
-    logger$p.info("SigNoz tracing initialized successfully");
-    return tracer;
-  } catch (error) {
-    logger$p.error("Failed to initialize SigNoz tracing", {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : void 0
-    });
-    return null;
-  }
-}
-function getTracer() {
-  if (!tracer) {
-    throw new Error("SigNoz tracing has not been initialized. Call initSigNoz first.");
-  }
-  return tracer;
-}
-function createAISpan(name, attributes = {}) {
-  if (!tracer) {
-    logger$p.warn("Creating span without initialized SigNoz tracing");
-    return api.trace.getTracer("no-op").startSpan(name);
-  }
-  return tracer.startSpan(name, {
-    attributes: {
-      "ai.operation": name,
-      ...attributes
-    }
-  });
-}
-function recordLlmMetrics(span, tokenInfo, latencyMs) {
-  if (!span) return;
-  if (tokenInfo?.promptTokens !== void 0) {
-    span.setAttribute(OTelAttributeNames.PROMPT_TOKENS, tokenInfo.promptTokens);
-  }
-  if (tokenInfo?.completionTokens !== void 0) {
-    span.setAttribute(OTelAttributeNames.COMPLETION_TOKENS, tokenInfo.completionTokens);
-  }
-  if (tokenInfo?.totalTokens !== void 0) {
-    span.setAttribute(OTelAttributeNames.TOTAL_TOKENS, tokenInfo.totalTokens);
-  }
-  if (latencyMs !== void 0) {
-    span.setAttribute(OTelAttributeNames.LATENCY_MS, latencyMs);
-  }
-}
-function recordMetrics(span, metrics) {
-  if (!span) return;
-  if (metrics.tokens !== void 0) {
-    span.setAttribute(OTelAttributeNames.TOTAL_TOKENS, metrics.tokens);
-  }
-  if (metrics.latencyMs !== void 0) {
-    span.setAttribute(OTelAttributeNames.LATENCY_MS, metrics.latencyMs);
-  }
-  if (metrics.status === "error" && metrics.errorMessage) {
-    span.setStatus({
-      code: SpanStatusCode.ERROR,
-      message: metrics.errorMessage
-    });
-  } else {
-    span.setStatus({
-      code: SpanStatusCode.OK
-    });
-  }
-}
-async function shutdownSigNoz() {
-  if (tracerProvider) {
-    try {
-      logger$p.info("Shutting down SigNoz tracing");
-      await tracerProvider.shutdown();
-      logger$p.info("SigNoz tracing shutdown complete");
-    } catch (error) {
-      logger$p.error("Error shutting down SigNoz tracing", { error });
-    }
-  }
-}
-function createHttpSpan(method, url, attributes = {}) {
-  if (!tracer) {
-    return api.trace.getTracer("no-op").startSpan(`HTTP ${method}`);
-  }
-  try {
-    const urlObj = new URL(url);
-    return tracer.startSpan(`HTTP ${method}`, {
-      attributes: {
-        "http.method": method,
-        "http.url": url,
-        "http.host": urlObj.host,
-        "http.scheme": urlObj.protocol.replace(":", ""),
-        "http.target": urlObj.pathname,
-        ...attributes
-      }
-    });
-  } catch (error) {
-    return tracer.startSpan(`HTTP ${method}`, {
-      attributes: {
-        "http.method": method,
-        "http.url": url,
-        ...attributes
-      }
-    });
-  }
-}
-var signoz = {
-  init: initSigNoz,
-  getTracer,
-  createSpan: createAISpan,
-  createHttpSpan,
-  recordLlmMetrics,
-  recordMetrics,
-  shutdown: shutdownSigNoz
-};
-
-const logger$o = createLogger({ name: "thread-manager", level: "info" });
+const logger$m = createLogger({ name: "thread-manager", level: "info" });
 class ThreadManager {
   threads = /* @__PURE__ */ new Map();
   resourceThreads = /* @__PURE__ */ new Map();
@@ -3943,7 +4097,7 @@ class ThreadManager {
    */
   async createThread(options) {
     const span = createAISpan("thread.create", { resourceId: options.resourceId });
-    logger$o.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
+    logger$m.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
     const startTime = Date.now();
     let runId;
     try {
@@ -3959,7 +4113,7 @@ class ThreadManager {
         this.resourceThreads.set(options.resourceId, /* @__PURE__ */ new Set());
       }
       this.resourceThreads.get(options.resourceId)?.add(threadId);
-      logger$o.info("Thread created", { threadId, resourceId: options.resourceId });
+      logger$m.info("Thread created", { threadId, resourceId: options.resourceId });
       span.setStatus({ code: 1 });
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "success" });
       runId = await createLangSmithRun("thread.create", [options.resourceId]);
@@ -3968,7 +4122,7 @@ class ThreadManager {
     } catch (error) {
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "error", errorMessage: String(error) });
       if (runId) await trackFeedback(runId, { score: 0, comment: "Thread creation failed", value: error });
-      logger$o.error("Failed to create thread", { error });
+      logger$m.error("Failed to create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -3985,11 +4139,11 @@ class ThreadManager {
     const span = createAISpan("thread.get", { threadId });
     try {
       const thread = this.threads.get(threadId);
-      logger$o.info("Get thread", { threadId, found: !!thread });
+      logger$m.info("Get thread", { threadId, found: !!thread });
       span.setStatus({ code: 1 });
       return thread;
     } catch (error) {
-      logger$o.error("Failed to get thread", { error });
+      logger$m.error("Failed to get thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -4007,11 +4161,11 @@ class ThreadManager {
     try {
       const threadIds = this.resourceThreads.get(resourceId) || /* @__PURE__ */ new Set();
       const threads = Array.from(threadIds).map((id) => this.threads.get(id)).filter((thread) => thread !== void 0);
-      logger$o.info("Get threads by resource", { resourceId, count: threads.length });
+      logger$m.info("Get threads by resource", { resourceId, count: threads.length });
       span.setStatus({ code: 1 });
       return threads;
     } catch (error) {
-      logger$o.error("Failed to get threads by resource", { error });
+      logger$m.error("Failed to get threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -4029,16 +4183,16 @@ class ThreadManager {
     try {
       const threads = this.getThreadsByResource(resourceId);
       if (threads.length === 0) {
-        logger$o.info("No threads found for resource", { resourceId });
+        logger$m.info("No threads found for resource", { resourceId });
         span.setStatus({ code: 1 });
         return void 0;
       }
       const mostRecent = threads.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-      logger$o.info("Most recent thread", { resourceId, threadId: mostRecent.id });
+      logger$m.info("Most recent thread", { resourceId, threadId: mostRecent.id });
       span.setStatus({ code: 1 });
       return mostRecent;
     } catch (error) {
-      logger$o.error("Failed to get most recent thread", { error });
+      logger$m.error("Failed to get most recent thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -4057,16 +4211,16 @@ class ThreadManager {
     try {
       const existingThread = this.getMostRecentThread(resourceId);
       if (existingThread) {
-        logger$o.info("Found existing thread", { resourceId, threadId: existingThread.id });
+        logger$m.info("Found existing thread", { resourceId, threadId: existingThread.id });
         span.setStatus({ code: 1 });
         return existingThread;
       }
-      logger$o.info("No existing thread, creating new", { resourceId });
+      logger$m.info("No existing thread, creating new", { resourceId });
       const newThread = await this.createThread({ resourceId, metadata });
       span.setStatus({ code: 1 });
       return newThread;
     } catch (error) {
-      logger$o.error("Failed to get or create thread", { error });
+      logger$m.error("Failed to get or create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -4085,11 +4239,11 @@ class ThreadManager {
       const thread = this.threads.get(threadId);
       if (thread) {
         thread.lastReadAt = date;
-        logger$o.info("Marked thread as read", { threadId, date });
+        logger$m.info("Marked thread as read", { threadId, date });
       }
       span.setStatus({ code: 1 });
     } catch (error) {
-      logger$o.error("Failed to mark thread as read", { error });
+      logger$m.error("Failed to mark thread as read", { error });
       span.setStatus({ code: 2, message: String(error) });
     } finally {
       span.end();
@@ -4108,11 +4262,11 @@ class ThreadManager {
         const lastRead = this.threadReadStatus.get(thread.id);
         return !lastRead || thread.createdAt > lastRead;
       });
-      logger$o.info("Get unread threads by resource", { resourceId, count: unread.length });
+      logger$m.info("Get unread threads by resource", { resourceId, count: unread.length });
       span.setStatus({ code: 1 });
       return unread;
     } catch (error) {
-      logger$o.error("Failed to get unread threads by resource", { error });
+      logger$m.error("Failed to get unread threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -5002,7 +5156,7 @@ const formatContentTool = createTool({
   }
 });
 
-const logger$n = createLogger({ name: "document-tools", level: process.env.LOG_LEVEL === "debug" ? "debug" : "info" });
+const logger$l = createLogger({ name: "document-tools", level: process.env.LOG_LEVEL === "debug" ? "debug" : "info" });
 const documentRepository = [
   {
     id: "1",
@@ -5143,19 +5297,19 @@ const extractHtmlTextTool = createTool({
     try {
       let html = context.html;
       if (!html && context.url) {
-        logger$n.info(`Fetching HTML from URL: ${context.url}`);
+        logger$l.info(`Fetching HTML from URL: ${context.url}`);
         const response = await fetch(context.url);
         if (!response.ok) throw new Error(`Failed to fetch URL: ${response.statusText}`);
         html = await response.text();
       }
       if (!html) throw new Error("No HTML content provided or fetched.");
-      logger$n.info("Extracting text from HTML using cheerio");
+      logger$l.info("Extracting text from HTML using cheerio");
       const $ = cheerio.load(html);
       const text = $("body").text();
       recordMetrics(span, { status: "success" });
       return { text };
     } catch (error) {
-      logger$n.error(`extractHtmlTextTool error: ${error instanceof Error ? error.message : String(error)}`);
+      logger$l.error(`extractHtmlTextTool error: ${error instanceof Error ? error.message : String(error)}`);
       recordMetrics(span, { status: "error", errorMessage: error instanceof Error ? error.message : String(error) });
       throw error;
     } finally {
@@ -5698,11 +5852,6 @@ function createLangChainModel(config = {}) {
       });
   }
 }
-function createLLMChain(promptTemplate, config) {
-  const llm = createLangChainModel(config);
-  const prompt = PromptTemplate.fromTemplate(promptTemplate);
-  return prompt.pipe(llm);
-}
 
 async function createGraphRelationships(documents, embeddings, threshold = 0.7) {
   const docsWithIds = documents.map((doc, index) => {
@@ -5958,403 +6107,6 @@ const graphRagQueryTool = createTool({
     }
   }
 });
-
-const logger$m = createLogger({ name: "llm-chain-tool", level: "info" });
-function createAiSdkModel(config = {}) {
-  switch (config.provider || "google") {
-    case "openai": {
-      const modelName = config.modelName || "gpt-4o";
-      return openai.chat(modelName, {});
-    }
-    case "google": {
-      const modelName = config.modelName || env.MODEL || "models/gemini-2.0-flash";
-      return google(modelName, {});
-    }
-    case "anthropic": {
-      const modelName = config.modelName || "claude-3-sonnet-20240229";
-      return anthropic(modelName, {});
-    }
-    default:
-      throw new Error(`Unsupported provider: ${config.provider}`);
-  }
-}
-const llmChainInputSchema = z.object({
-  promptTemplate: z.string().describe("The prompt template with {variables} to replace"),
-  variables: z.record(z.string()).describe("Key-value pairs to substitute in the template"),
-  provider: z.enum(["openai", "google", "anthropic"]).optional().describe("LLM provider to use"),
-  modelName: z.string().optional().describe("Specific model name to use"),
-  temperature: z.number().min(0).max(1).optional().describe("Creativity temperature (0-1)"),
-  maxTokens: z.number().optional().describe("Maximum tokens in response"),
-  useLangChain: z.boolean().optional().default(false).describe("Whether to use LangChain (true) or AI SDK (false)")
-});
-const llmChainTool = createAIFunction(
-  {
-    name: "llm-chain",
-    description: "Runs an LLM chain with a prompt template and variables",
-    inputSchema: llmChainInputSchema
-  },
-  async (context) => {
-    const startTime = Date.now();
-    const runId = await createLangSmithRun("llm-chain-tool", [
-      "llm-chain",
-      context.provider || "default"
-    ]);
-    try {
-      const {
-        promptTemplate,
-        variables,
-        provider = "google",
-        modelName,
-        temperature,
-        maxTokens,
-        useLangChain = false
-      } = context;
-      const llmConfig = {
-        provider,
-        modelName,
-        temperature,
-        maxTokens,
-        enableTracing: true
-      };
-      let result;
-      if (useLangChain) {
-        const chain = createLLMChain(promptTemplate, llmConfig);
-        const response = await chain.invoke(variables);
-        result = String(response);
-      } else {
-        const model = createAiSdkModel(llmConfig);
-        let prompt = promptTemplate;
-        for (const [key, value] of Object.entries(variables)) {
-          prompt = prompt.replace(new RegExp(`{${key}}`, "g"), String(value));
-        }
-        const messages = [{ role: "user", content: prompt }];
-        let response;
-        if (provider === "openai") {
-          const openAIModel = model;
-          response = await openAIModel.chat({ messages });
-          result = response.content;
-        } else if (provider === "anthropic") {
-          const anthropicModel = model;
-          response = await anthropicModel.messages({ messages });
-          result = response.content;
-        } else {
-          const googleModel = model;
-          response = await googleModel.generateContent({
-            contents: [{ role: "user", text: prompt }]
-          });
-          result = response.text;
-        }
-      }
-      const elapsedTimeMs = Date.now() - startTime;
-      await trackFeedback(runId, {
-        score: 1,
-        comment: `Successfully executed LLM chain in ${elapsedTimeMs}ms`,
-        key: "llm_chain_success"
-      });
-      return {
-        result,
-        success: true,
-        metadata: {
-          provider,
-          model: modelName || (provider === "google" ? "gemini" : provider === "openai" ? "gpt-4o" : "claude"),
-          elapsedTimeMs
-        }
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      console.error("LLM chain execution error:", error);
-      await trackFeedback(runId, {
-        score: 0,
-        comment: errorMessage,
-        key: "llm_chain_failure"
-      });
-      return {
-        result: "",
-        success: false,
-        metadata: {
-          provider: context.provider || "unknown",
-          model: context.modelName || "unknown",
-          elapsedTimeMs: Date.now() - startTime
-        },
-        error: errorMessage
-      };
-    }
-  }
-);
-console.log("llmChainTool:", llmChainTool);
-logger$m.info("Registered llmChainTool", { tool: llmChainTool });
-const aiSdkPromptInputSchema = z.object({
-  prompt: z.string().describe("The prompt to send to the model"),
-  provider: z.enum(["openai", "google", "anthropic"]).optional().describe("LLM provider to use"),
-  modelName: z.string().optional().describe("Specific model name to use"),
-  temperature: z.number().min(0).max(1).optional().describe("Creativity temperature (0-1)"),
-  maxTokens: z.number().optional().describe("Maximum tokens in response"),
-  schema: z.record(z.any()).optional().describe("JSON schema for structured output"),
-  systemPrompt: z.string().optional().describe("System prompt to use"),
-  history: z.array(
-    z.object({
-      role: z.enum(["user", "assistant", "system"]),
-      content: z.string()
-    })
-  ).optional().describe("Conversation history"),
-  // Add threadId and resourceId to the input schema if they are needed by the execute logic
-  threadId: z.string().optional().describe("Execution thread ID"),
-  resourceId: z.string().optional().describe("Resource ID for observability")
-});
-const aiSdkPromptTool = createAIFunction(
-  {
-    name: "ai-sdk-prompt",
-    description: "Runs a prompt through AI SDK with structured output support",
-    inputSchema: aiSdkPromptInputSchema
-  },
-  async (context) => {
-    const startTime = Date.now();
-    const runId = await createLangSmithRun("ai-sdk-prompt-tool", [
-      "ai-sdk",
-      context.provider || "default"
-    ]);
-    const executionThreadId = context.threadId;
-    const resourceId = context.resourceId;
-    try {
-      const {
-        prompt,
-        provider = "google",
-        modelName,
-        schema,
-        systemPrompt,
-        history = []
-      } = context;
-      const llmConfig = {
-        provider,
-        modelName};
-      const model = createAiSdkModel(llmConfig);
-      const messages = [];
-      if (systemPrompt) {
-        messages.push({ role: "system", content: systemPrompt });
-      }
-      if (history.length > 0) {
-        messages.push(...history);
-      }
-      messages.push({ role: "user", content: prompt });
-      let text;
-      let structured = void 0;
-      let response;
-      if (provider === "openai") {
-        const options = { messages };
-        if (executionThreadId) {
-          options.thread_id = executionThreadId;
-        }
-        if (resourceId) {
-          options.metadata = {
-            ...options.metadata || {},
-            resourceId
-          };
-        }
-        if (schema) {
-          options.tools = [
-            {
-              type: "function",
-              function: {
-                name: "output_formatter",
-                description: "Format output according to schema",
-                parameters: schema
-              }
-            }
-          ];
-          options.tool_choice = {
-            type: "function",
-            function: { name: "output_formatter" }
-          };
-        }
-        const openAIModel = model;
-        response = await openAIModel.chat(options);
-        if (schema && response.tool_calls?.length > 0) {
-          try {
-            structured = JSON.parse(response.tool_calls[0].function.arguments);
-            text = JSON.stringify(structured, null, 2);
-          } catch (e) {
-            console.warn("Failed to parse OpenAI tool call response:", e);
-            text = response.content || "";
-          }
-        } else {
-          text = response.content || "";
-        }
-      } else if (provider === "anthropic") {
-        const options = { messages };
-        if (executionThreadId) {
-          options.threadId = executionThreadId;
-        }
-        if (resourceId) {
-          options.metadata = {
-            ...options.metadata || {},
-            resourceId
-          };
-        }
-        if (schema) {
-          options.tools = [
-            {
-              name: "output_formatter",
-              description: "Format output according to schema",
-              parameters: schema
-            }
-          ];
-          options.tool_choice = {
-            type: "function",
-            function: { name: "output_formatter" }
-          };
-          const anthropicModel = model;
-          response = await anthropicModel.messages(options);
-          if (response.tool_calls && response.tool_calls.length > 0) {
-            try {
-              structured = JSON.parse(
-                response.tool_calls[0].function.arguments
-              );
-              text = JSON.stringify(structured, null, 2);
-            } catch (e) {
-              console.warn("Failed to parse Claude tool call response:", e);
-              text = response.content || "";
-            }
-          } else {
-            text = response.content || "";
-          }
-        } else {
-          const anthropicModel = model;
-          response = await anthropicModel.messages(options);
-          text = response.content || "";
-        }
-      } else {
-        const options = {
-          contents: messages.map((m) => ({
-            role: m.role,
-            parts: [{ text: m.content }]
-          }))
-        };
-        if (executionThreadId) {
-          options.threadId = executionThreadId;
-        }
-        if (resourceId) {
-          options.metadata = {
-            ...options.metadata || {},
-            resourceId
-          };
-        }
-        if (schema) {
-          options.tools = [
-            {
-              functionDeclarations: [
-                {
-                  name: "output_formatter",
-                  description: "Format output according to schema",
-                  parameters: schema
-                }
-              ]
-            }
-          ];
-          options.toolConfig = {
-            functionCallingConfig: {
-              mode: "AUTO",
-              allowedFunctionNames: ["output_formatter"]
-            }
-          };
-        }
-        const googleModel = model;
-        response = await googleModel.generateContent(options);
-        if (schema && response.candidates && response.candidates[0]?.content?.parts?.length > 0) {
-          const functionCallPart = response.candidates[0].content.parts.find(
-            (part) => part.functionCall
-          );
-          if (functionCallPart?.functionCall) {
-            try {
-              structured = JSON.parse(functionCallPart.functionCall.args);
-              text = JSON.stringify(structured, null, 2);
-            } catch (e) {
-              console.warn("Failed to parse Google function call response:", e);
-              text = response.text || "";
-            }
-          } else {
-            text = response.text || "";
-          }
-        } else if (response.candidates?.[0]?.content?.parts?.[0]?.text) {
-          text = response.candidates[0].content.parts[0].text;
-        } else {
-          text = response.text || "";
-        }
-      }
-      const elapsedTimeMs = Date.now() - startTime;
-      await trackFeedback(runId, {
-        score: 1,
-        comment: `Successfully executed AI SDK prompt in ${elapsedTimeMs}ms`,
-        key: "ai_sdk_success"
-      });
-      return {
-        text,
-        structured,
-        success: true,
-        metadata: {
-          provider,
-          model: modelName || (provider === "google" ? "gemini" : provider === "openai" ? "gpt-4o" : "claude"),
-          elapsedTimeMs
-        }
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      console.error("AI SDK prompt execution error:", error);
-      await trackFeedback(runId, {
-        score: 0,
-        comment: errorMessage,
-        key: "ai_sdk_failure"
-      });
-      return {
-        text: "",
-        success: false,
-        metadata: {
-          provider: context.provider || "unknown",
-          model: context.modelName || "unknown",
-          elapsedTimeMs: Date.now() - startTime
-        },
-        error: errorMessage
-      };
-    }
-  }
-);
-const LLMChainOutputSchema = z.object({
-  result: z.string().describe("The final string output from the LLM chain."),
-  success: z.boolean().describe("Indicates if the chain execution was successful."),
-  metadata: z.object({
-    provider: z.string(),
-    model: z.string(),
-    elapsedTimeMs: z.number()
-  }).passthrough().describe("Execution metadata."),
-  error: z.string().optional().describe("Error message if execution failed.")
-}).describe("Schema for the output of the llm-chain tool");
-const AiSdkPromptOutputSchema = z.object({
-  text: z.string().describe("The primary text output from the AI SDK call."),
-  structured: z.unknown().optional().describe("Parsed structured output object if a schema was provided."),
-  success: z.boolean().describe("Indicates if the AI SDK call was successful."),
-  metadata: z.object({
-    provider: z.string(),
-    model: z.string(),
-    elapsedTimeMs: z.number(),
-    usage: z.object({
-      promptTokens: z.number().int().optional(),
-      completionTokens: z.number().int().optional(),
-      totalTokens: z.number().int().optional()
-    }).optional(),
-    finishReason: z.string().optional(),
-    rawResponse: z.any().optional()
-  }).passthrough().describe("Execution metadata."),
-  error: z.string().optional().describe("Error message if execution failed.")
-}).describe("Schema for the output of the ai-sdk-prompt tool");
-function createMastraLLMChainTools() {
-  const mastraTools = createMastraTools(llmChainTool, aiSdkPromptTool);
-  if (mastraTools["llm-chain"]) {
-    mastraTools["llm-chain"].outputSchema = LLMChainOutputSchema;
-  }
-  if (mastraTools["ai-sdk-prompt"]) {
-    mastraTools["ai-sdk-prompt"].outputSchema = AiSdkPromptOutputSchema;
-  }
-  return mastraTools;
-}
 
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -6722,7 +6474,7 @@ const github = new GithubIntegration({
   }
 });
 
-const logger$l = createLogger({ name: "evals", level: "info" });
+const logger$k = createLogger({ name: "evals", level: "info" });
 function getEvalModelId() {
   return process.env.EVAL_MODEL_ID || "models/gemini-2.0-flashlite";
 }
@@ -7188,12 +6940,12 @@ const faithfulnessEvalTool = createTool({
       const explanation = `Matched ${matched} of ${facts.length} reference facts.`;
       signoz.recordMetrics(span, { latencyMs: performance.now() - startTime, status: "success" });
       span.end();
-      logger$l.info("Faithfulness eval result", { score, explanation, response: context.response });
+      logger$k.info("Faithfulness eval result", { score, explanation, response: context.response });
       return { score, explanation, success: true };
     } catch (error) {
       signoz.recordMetrics(span, { latencyMs: performance.now() - startTime, status: "error", errorMessage: error instanceof Error ? error.message : String(error) });
       span.end();
-      logger$l.error("Faithfulness eval error", { error });
+      logger$k.error("Faithfulness eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -7231,12 +6983,12 @@ const biasEvalTool = createTool({
       const found = biasKeywords.filter((k) => lower.includes(k));
       const score = found.length > 0 ? Math.min(1, found.length * 0.3) : 0;
       const explanation = found.length > 0 ? `Detected possible bias: ${found.join(", ")}` : "No obvious bias detected.";
-      logger$l.info("Bias eval result", { score, explanation, response: context.response });
+      logger$k.info("Bias eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$l.error("Bias eval error", { error });
+      logger$k.error("Bias eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -7275,12 +7027,12 @@ const toxicityEvalTool = createTool({
       const found = toxicKeywords.filter((k) => lower.includes(k));
       const score = found.length > 0 ? Math.min(1, found.length * 0.2) : 0;
       const explanation = found.length > 0 ? `Detected possible toxicity: ${found.join(", ")}` : "No obvious toxicity detected.";
-      logger$l.info("Toxicity eval result", { score, explanation, response: context.response });
+      logger$k.info("Toxicity eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$l.error("Toxicity eval error", { error });
+      logger$k.error("Toxicity eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -7312,12 +7064,12 @@ const hallucinationEvalTool = createTool({
       }
       const score = sentences.length > 0 ? hallucinated / sentences.length : 0;
       const explanation = hallucinated > 0 ? `${hallucinated} of ${sentences.length} sentences may be hallucinated.` : "No obvious hallucinations detected.";
-      logger$l.info("Hallucination eval result", { score, explanation, response: context.response });
+      logger$k.info("Hallucination eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$l.error("Hallucination eval error", { error });
+      logger$k.error("Hallucination eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -7345,76 +7097,16 @@ const summarizationEvalTool = createTool({
       const brevity = 1 - Math.min(1, context.summary.length / (context.reference.length || 1));
       const score = Math.max(0, Math.min(1, coverage * 0.7 + brevity * 0.3));
       const explanation = `Coverage: ${(coverage * 100).toFixed(0)}%, Brevity: ${(brevity * 100).toFixed(0)}%`;
-      logger$l.info("Summarization eval result", { score, explanation, summary: context.summary });
+      logger$k.info("Summarization eval result", { score, explanation, summary: context.summary });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$l.error("Summarization eval error", { error });
+      logger$k.error("Summarization eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 });
-
-const logger$k = createLogger({ name: "opentelemetry-tracing", level: "info" });
-function initOpenTelemetry({
-  serviceName = "deanmachines-ai",
-  serviceVersion = "1.0.0",
-  environment = "development",
-  enabled = true,
-  endpoint
-}) {
-  if (!enabled) {
-    logger$k.info("OpenTelemetry tracing is disabled");
-    return null;
-  }
-  try {
-    logger$k.info(`Initializing OpenTelemetry for service: ${serviceName}`, { environment });
-    const exporterUrl = endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4317/v1/traces";
-    const traceExporter = new OTLPTraceExporter({
-      url: exporterUrl
-    });
-    const resource = resourceFromAttributes({
-      [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
-      [SemanticResourceAttributes.SERVICE_VERSION]: serviceVersion,
-      [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: environment
-    });
-    const sdk = new NodeSDK({
-      resource,
-      traceExporter,
-      instrumentations: [getNodeAutoInstrumentations()]
-    });
-    try {
-      sdk.start();
-      logger$k.info("OpenTelemetry SDK initialized successfully");
-    } catch (initError) {
-      logger$k.error("Error initializing OpenTelemetry SDK", {
-        error: initError instanceof Error ? initError.message : String(initError)
-      });
-    }
-    process$1.on("SIGTERM", () => {
-      if (sdk) {
-        try {
-          sdk.shutdown();
-          logger$k.info("OpenTelemetry SDK shut down successfully");
-        } catch (shutdownError) {
-          logger$k.error("Error shutting down OpenTelemetry SDK", {
-            error: shutdownError instanceof Error ? shutdownError.message : String(shutdownError)
-          });
-        } finally {
-          process$1.exit(0);
-        }
-      }
-    });
-    return sdk;
-  } catch (error) {
-    logger$k.error("Failed to initialize OpenTelemetry", {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : void 0
-    });
-    return null;
-  }
-}
 
 const startAISpanTool = createTool({
   id: "start-ai-span",
@@ -7714,14 +7406,6 @@ try {
   logger$j.error("Failed to initialize GraphRag tools:", { error });
 }
 try {
-  const llmChainToolsObject = createMastraLLMChainTools();
-  const llmChainToolsArray = Object.values(llmChainToolsObject);
-  extraTools.push(...llmChainToolsArray.map((tool) => tool));
-  logger$j.info(`Added ${llmChainToolsArray.length} LLM Chain tools.`);
-} catch (error) {
-  logger$j.error("Failed to initialize LLM Chain tools:", { error });
-}
-try {
   const githubToolsObject = createMastraGitHubTools();
   const githubToolsArray = Object.values(githubToolsObject);
   extraTools.push(...githubToolsArray.map((tool) => tool));
@@ -7756,12 +7440,59 @@ logger$j.info(`E2B tools included: ${extraTools.some((t) => t.id.startsWith("e2b
 logger$j.info(`Arxiv tools included: ${extraTools.some((t) => t.id.startsWith("arxiv_"))}`);
 logger$j.info(`AI SDK tools included: ${extraTools.some((t) => t.id.startsWith("ai-sdk_"))}`);
 
-const logger$i = createLogger({ name: "agent-initialization", level: "info" });
+initializeDefaultTracing();
+const { tracer: signozTracer, meter } = initSigNoz({
+  serviceName: "agent-initialization",
+  export: {
+    type: "otlp",
+    endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+    headers: {},
+    metricsInterval: 6e4
+  }
+});
+const agentMeter = meter?.getMeter ? meter.getMeter("agent-metrics") : void 0;
+const agentCreationCounter = agentMeter?.createCounter("agent.creation.count", {
+  description: "Number of agents created"
+});
+const agentCreationLatency = agentMeter?.createHistogram("agent.creation.latency_ms", {
+  description: "Time taken to create an agent"
+});
+const baseLogger = createLogger({ name: "agent-initialization", level: "debug" });
+const logger$i = {
+  debug: (msg, meta) => {
+    baseLogger.debug(msg, meta);
+    upstashLogger.debug({ message: msg, ...meta });
+    fileLogger.debug(String(msg), meta);
+    signozTracer?.startSpan("agent.debug").end();
+  },
+  info: (msg, meta) => {
+    baseLogger.info(msg, meta);
+    upstashLogger.info({ message: msg, ...meta });
+    fileLogger.info(String(msg), meta);
+    signozTracer?.startSpan("agent.info").end();
+  },
+  warn: (msg, meta) => {
+    baseLogger.warn(msg, meta);
+    upstashLogger.warn({ message: msg, ...meta });
+    fileLogger.warn(String(msg), meta);
+    signozTracer?.startSpan("agent.warn").end();
+  },
+  error: (msg, meta) => {
+    baseLogger.error(msg, meta);
+    upstashLogger.error({ message: msg, ...meta });
+    fileLogger.error(String(msg), meta);
+    signozTracer?.startSpan("agent.error").end();
+  }
+};
 function createAgentFromConfig({
   config,
   memory,
   onError
 }) {
+  const start = Date.now();
+  const span = signozTracer?.startSpan("agent.create", {
+    attributes: { agent_id: config.id }
+  });
   if (!config.id || !config.name || !config.instructions) {
     throw new Error(
       `Invalid agent configuration for ${config.id || "unknown agent"}`
@@ -7787,28 +7518,34 @@ function createAgentFromConfig({
   logger$i.info(
     `Creating agent: ${config.id} with ${Object.keys(tools).length} tools`
   );
+  let agent;
   try {
     const model = createModelInstance(config.modelConfig);
-    return new Agent({
+    agent = new Agent({
       model,
       memory,
       // Using injected memory instead of global reference
       name: config.name,
       instructions: config.instructions,
       tools,
+      // voice, // voice temporarily disabled
       ...responseHook ? { onResponse: responseHook } : {},
       ...onError ? { onError } : {}
       // Add error handler if provided
     });
   } catch (error) {
-    logger$i.error(
-      `Failed to create agent ${config.id}: ${error instanceof Error ? error.message : String(error)}`
-    );
+    span?.setStatus({ code: api.SpanStatusCode.ERROR, message: error.message });
+    span?.end();
     throw error;
   }
+  span?.setStatus({ code: api.SpanStatusCode.OK });
+  span?.end();
+  agentCreationCounter?.add(1, { agent_id: config.id });
+  agentCreationLatency?.record(Date.now() - start, { agent_id: config.id });
+  return agent;
 }
 
-const logger$h = createLogger({ name: "research-agent", level: "info" });
+const logger$h = createLogger({ name: "research-agent", level: "debug" });
 const researchAgent = createAgentFromConfig({
   config: researchAgentConfig,
   memory: sharedMemory,
@@ -7821,7 +7558,7 @@ const researchAgent = createAgentFromConfig({
   }
 });
 
-const logger$g = createLogger({ name: "analyst-agent", level: "info" });
+const logger$g = createLogger({ name: "analyst-agent", level: "debug" });
 const analystAgent = createAgentFromConfig({
   config: analystAgentConfig,
   memory: sharedMemory,
@@ -7847,7 +7584,7 @@ const writerAgent = createAgentFromConfig({
   }
 });
 
-const logger$e = createLogger({ name: "rl-trainer-agent", level: "info" });
+const logger$e = createLogger({ name: "rl-trainer-agent", level: "debug" });
 const rlTrainerAgent = createAgentFromConfig({
   config: rlTrainerAgentConfig,
   memory: sharedMemory,
@@ -7860,7 +7597,7 @@ const rlTrainerAgent = createAgentFromConfig({
   }
 });
 
-const logger$d = createLogger({ name: "data-manager-agent", level: "info" });
+const logger$d = createLogger({ name: "data-manager-agent", level: "debug" });
 const dataManagerAgent = createAgentFromConfig({
   config: dataManagerAgentConfig,
   memory: sharedMemory,
@@ -7873,7 +7610,7 @@ const dataManagerAgent = createAgentFromConfig({
   }
 });
 
-const logger$c = createLogger({ name: "agentic-agent", level: "info" });
+const logger$c = createLogger({ name: "agentic-agent", level: "debug" });
 const agenticAssistant = createAgentFromConfig({
   config: agenticAssistantConfig,
   memory: sharedMemory,
@@ -7886,7 +7623,7 @@ const agenticAssistant = createAgentFromConfig({
   }
 });
 
-const logger$b = createLogger({ name: "coder-agent", level: "info" });
+const logger$b = createLogger({ name: "coder-agent", level: "debug" });
 function initializeCoderAgent() {
   logger$b.info("Initializing coder agent");
   try {
@@ -7910,7 +7647,7 @@ function initializeCoderAgent() {
 }
 const coderAgent = initializeCoderAgent();
 
-const logger$a = createLogger({ name: "copywriter-agent", level: "info" });
+const logger$a = createLogger({ name: "copywriter-agent", level: "debug" });
 function initializeCopywriterAgent() {
   logger$a.info("Initializing copywriter agent");
   try {
@@ -7934,7 +7671,7 @@ function initializeCopywriterAgent() {
 }
 const copywriterAgent = initializeCopywriterAgent();
 
-const logger$9 = createLogger({ name: "architect-agent", level: "info" });
+const logger$9 = createLogger({ name: "architect-agent", level: "debug" });
 const architectAgent = createAgentFromConfig({
   config: architectConfig,
   memory: sharedMemory,
@@ -7947,7 +7684,7 @@ const architectAgent = createAgentFromConfig({
   }
 });
 
-const logger$8 = createLogger({ name: "debugger-agent", level: "info" });
+const logger$8 = createLogger({ name: "debugger-agent", level: "debug" });
 const debuggerAgent = createAgentFromConfig({
   config: debuggerConfig,
   memory: sharedMemory,
@@ -7960,7 +7697,7 @@ const debuggerAgent = createAgentFromConfig({
   }
 });
 
-const logger$7 = createLogger({ name: "ui-ux-coder-agent", level: "info" });
+const logger$7 = createLogger({ name: "ui-ux-coder-agent", level: "debug" });
 const uiUxCoderAgent = createAgentFromConfig({
   config: uiUxCoderConfig,
   memory: sharedMemory,
@@ -7973,7 +7710,7 @@ const uiUxCoderAgent = createAgentFromConfig({
   }
 });
 
-const logger$6 = createLogger({ name: "code-documenter-agent", level: "info" });
+const logger$6 = createLogger({ name: "code-documenter-agent", level: "debug" });
 const codeDocumenterAgent = createAgentFromConfig({
   config: codeDocumenterConfig,
   memory: sharedMemory,
@@ -7986,7 +7723,7 @@ const codeDocumenterAgent = createAgentFromConfig({
   }
 });
 
-const logger$5 = createLogger({ name: "market-research-agent", level: "info" });
+const logger$5 = createLogger({ name: "market-research-agent", level: "debug" });
 const marketResearchAgent = createAgentFromConfig({
   config: marketResearchAgentConfig,
   memory: sharedMemory,
@@ -7999,7 +7736,7 @@ const marketResearchAgent = createAgentFromConfig({
   }
 });
 
-const logger$4 = createLogger({ name: "social-media-agent", level: "info" });
+const logger$4 = createLogger({ name: "social-media-agent", level: "debug" });
 const socialMediaAgent = createAgentFromConfig({
   config: socialMediaAgentConfig,
   memory: sharedMemory,
@@ -8012,7 +7749,7 @@ const socialMediaAgent = createAgentFromConfig({
   }
 });
 
-const logger$3 = createLogger({ name: "seo-agent", level: "info" });
+const logger$3 = createLogger({ name: "seo-agent", level: "debug" });
 const seoAgent = createAgentFromConfig({
   config: seoAgentConfig,
   memory: sharedMemory,

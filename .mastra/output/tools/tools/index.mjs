@@ -10,7 +10,7 @@ import { AsyncCaller } from '@langchain/core/utils/async_caller';
 import { BraveSearchClient } from '@agentic/brave-search';
 import { GoogleCustomSearchClient } from '@agentic/google-custom-search';
 import { TavilyClient } from '@agentic/tavily';
-import { aiFunction, AIFunctionsProvider, AIFunctionSet, asZodOrJsonSchema, sanitizeSearchParams, pruneEmpty, assert, getEnv, throttleKy, isZodSchema, asAgenticSchema, createAIFunction, createJsonSchema } from '@agentic/core';
+import { aiFunction, AIFunctionsProvider, AIFunctionSet, asZodOrJsonSchema, sanitizeSearchParams, pruneEmpty, assert, getEnv, throttleKy, isZodSchema, asAgenticSchema, createAIFunction } from '@agentic/core';
 import { createMastraTools } from '@agentic/mastra';
 export { createMastraTools } from '@agentic/mastra';
 import Exa from 'exa-js';
@@ -27,6 +27,8 @@ import { resourceFromAttributes } from '@opentelemetry/resources';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { BatchSpanProcessor, SimpleSpanProcessor, ConsoleSpanExporter } from '@opentelemetry/sdk-trace-base';
+import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-proto';
+import { PeriodicExportingMetricReader, MeterProvider } from '@opentelemetry/sdk-metrics';
 import { randomUUID } from 'crypto';
 import { vertex } from '@ai-sdk/google-vertex';
 import { openai } from '@ai-sdk/openai';
@@ -55,7 +57,6 @@ import { GithubIntegration } from '@mastra/github';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { create, all } from 'mathjs';
-import { Client as Client$1 } from '@modelcontextprotocol/sdk/client/index.js';
 
 class MastraEmbeddingAdapter extends GoogleGenerativeAIEmbeddings {
   /**
@@ -117,7 +118,7 @@ function createEmbeddings(apiKey, modelName) {
   });
 }
 
-const logger$9 = createLogger({ name: "vector-query-tool", level: "info" });
+const logger$8 = createLogger({ name: "vector-query-tool", level: "info" });
 const envSchema$2 = z.object({
   GOOGLE_AI_API_KEY: z.string().min(1, "Google AI API key is required"),
   PINECONE_INDEX: z.string().default("Default"),
@@ -128,7 +129,7 @@ const validatedEnv$1 = (() => {
   try {
     return envSchema$2.parse(env);
   } catch (error) {
-    logger$9.error("Environment validation failed:", { error });
+    logger$8.error("Environment validation failed:", { error });
     throw new Error(
       `Vector query tool configuration error: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -143,12 +144,12 @@ function createMastraVectorQueryTool(config = {}) {
     const dimensions = config.dimensions || validatedEnv$1.PINECONE_DIMENSION;
     const apiKey = config.apiKey || validatedEnv$1.GOOGLE_AI_API_KEY;
     const topK = config.topK || 5;
-    logger$9.info(
+    logger$8.info(
       `Creating vector query tool for ${vectorStoreName}:${indexName}`
     );
     let embeddingModel;
     if (embeddingProvider === "tiktoken") {
-      logger$9.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
+      logger$8.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
       const tiktokenAdapter = {
         specificationVersion: "v1",
         provider: "tiktoken",
@@ -172,7 +173,7 @@ function createMastraVectorQueryTool(config = {}) {
             }
             return { embeddings: [{ embedding }] };
           } catch (error) {
-            logger$9.error("Tiktoken embedding error:", { error });
+            logger$8.error("Tiktoken embedding error:", { error });
             throw new Error(
               `Tiktoken embedding failed: ${error instanceof Error ? error.message : String(error)}`
             );
@@ -202,7 +203,7 @@ function createMastraVectorQueryTool(config = {}) {
       };
       embeddingModel = tiktokenAdapter;
     } else {
-      logger$9.info("Using Google embeddings");
+      logger$8.info("Using Google embeddings");
       embeddingModel = createEmbeddings(
         apiKey,
         "models/gemini-embedding-exp-03-07"
@@ -230,10 +231,10 @@ function createMastraVectorQueryTool(config = {}) {
       description,
       enableFilter: config.enableFilters
     });
-    logger$9.info(`Vector query tool created: ${toolId}`);
+    logger$8.info(`Vector query tool created: ${toolId}`);
     return tool;
   } catch (error) {
-    logger$9.error("Failed to create vector query tool:", { error });
+    logger$8.error("Failed to create vector query tool:", { error });
     throw new Error(
       `Vector query tool creation failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -1349,22 +1350,22 @@ const OTelAttributeNames = {
   TOTAL_TOKENS: "ai.tokens.total",
   LATENCY_MS: "ai.latency.ms"};
 
-const logger$8 = createLogger({ name: "signoz-service", level: "info" });
+const logger$7 = createLogger({ name: "signoz-service", level: "info" });
 let tracerProvider = null;
 let tracer = null;
 function initSigNoz(config) {
   if (config.enabled === false) {
-    logger$8.info("SigNoz tracing is disabled");
-    return null;
+    logger$7.info("SigNoz tracing is disabled");
+    return { tracer: null, meter: null };
   }
   if (tracer) {
-    return tracer;
+    return { tracer, meter: null };
   }
   try {
     const serviceName = config.serviceName || "deanmachines-ai";
     const endpoint = config.export?.endpoint || env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces";
     const headers = config.export?.headers || {};
-    logger$8.info(`Initializing SigNoz tracing for service: ${serviceName}`, { endpoint });
+    logger$7.info(`Initializing SigNoz tracing for service: ${serviceName}`, { endpoint });
     const resource = resourceFromAttributes({
       [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
       [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: env.NODE_ENV || "development"
@@ -1377,7 +1378,7 @@ function initSigNoz(config) {
     processors.push(new BatchSpanProcessor(otlpExporter));
     if (env.NODE_ENV !== "production") {
       processors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
-      logger$8.debug("Added console span exporter for debugging");
+      logger$7.debug("Added console span exporter for debugging");
     }
     tracerProvider = new NodeTracerProvider({
       resource,
@@ -1385,14 +1386,31 @@ function initSigNoz(config) {
     });
     tracerProvider.register();
     tracer = api.trace.getTracer("deanmachines-tracer");
-    logger$8.info("SigNoz tracing initialized successfully");
-    return tracer;
+    logger$7.info("SigNoz tracing initialized successfully");
+    const metricExporter = new OTLPMetricExporter({
+      url: env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT || endpoint.replace("/v1/traces", "/v1/metrics"),
+      headers
+    });
+    const metricReader = new PeriodicExportingMetricReader({
+      exporter: metricExporter,
+      exportIntervalMillis: config.export?.metricsInterval ?? 6e4
+    });
+    const meterProvider = new MeterProvider({
+      resource,
+      views: [],
+      // add any custom views here
+      readers: [metricReader]
+    });
+    if (env.NODE_ENV !== "production") {
+      logger$7.debug("SigNoz metrics exporter configured");
+    }
+    return { tracer, meter: meterProvider };
   } catch (error) {
-    logger$8.error("Failed to initialize SigNoz tracing", {
+    logger$7.error("Failed to initialize SigNoz tracing", {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : void 0
     });
-    return null;
+    return { tracer: null, meter: null };
   }
 }
 function getTracer() {
@@ -1403,7 +1421,7 @@ function getTracer() {
 }
 function createAISpan(name, attributes = {}) {
   if (!tracer) {
-    logger$8.warn("Creating span without initialized SigNoz tracing");
+    logger$7.warn("Creating span without initialized SigNoz tracing");
     return api.trace.getTracer("no-op").startSpan(name);
   }
   return tracer.startSpan(name, {
@@ -1450,11 +1468,11 @@ function recordMetrics(span, metrics) {
 async function shutdownSigNoz() {
   if (tracerProvider) {
     try {
-      logger$8.info("Shutting down SigNoz tracing");
+      logger$7.info("Shutting down SigNoz tracing");
       await tracerProvider.shutdown();
-      logger$8.info("SigNoz tracing shutdown complete");
+      logger$7.info("SigNoz tracing shutdown complete");
     } catch (error) {
-      logger$8.error("Error shutting down SigNoz tracing", { error });
+      logger$7.error("Error shutting down SigNoz tracing", { error });
     }
   }
 }
@@ -1491,10 +1509,12 @@ var signoz = {
   createHttpSpan,
   recordLlmMetrics,
   recordMetrics,
-  shutdown: shutdownSigNoz
+  shutdown: async () => {
+    if (tracerProvider) await tracerProvider.shutdown();
+  }
 };
 
-const logger$7 = createLogger({ name: "thread-manager", level: "info" });
+const logger$6 = createLogger({ name: "thread-manager", level: "info" });
 class ThreadManager {
   threads = /* @__PURE__ */ new Map();
   resourceThreads = /* @__PURE__ */ new Map();
@@ -1508,7 +1528,7 @@ class ThreadManager {
    */
   async createThread(options) {
     const span = createAISpan("thread.create", { resourceId: options.resourceId });
-    logger$7.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
+    logger$6.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
     const startTime = Date.now();
     let runId;
     try {
@@ -1524,7 +1544,7 @@ class ThreadManager {
         this.resourceThreads.set(options.resourceId, /* @__PURE__ */ new Set());
       }
       this.resourceThreads.get(options.resourceId)?.add(threadId);
-      logger$7.info("Thread created", { threadId, resourceId: options.resourceId });
+      logger$6.info("Thread created", { threadId, resourceId: options.resourceId });
       span.setStatus({ code: 1 });
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "success" });
       runId = await createLangSmithRun("thread.create", [options.resourceId]);
@@ -1533,7 +1553,7 @@ class ThreadManager {
     } catch (error) {
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "error", errorMessage: String(error) });
       if (runId) await trackFeedback(runId, { score: 0, comment: "Thread creation failed", value: error });
-      logger$7.error("Failed to create thread", { error });
+      logger$6.error("Failed to create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -1550,11 +1570,11 @@ class ThreadManager {
     const span = createAISpan("thread.get", { threadId });
     try {
       const thread = this.threads.get(threadId);
-      logger$7.info("Get thread", { threadId, found: !!thread });
+      logger$6.info("Get thread", { threadId, found: !!thread });
       span.setStatus({ code: 1 });
       return thread;
     } catch (error) {
-      logger$7.error("Failed to get thread", { error });
+      logger$6.error("Failed to get thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -1572,11 +1592,11 @@ class ThreadManager {
     try {
       const threadIds = this.resourceThreads.get(resourceId) || /* @__PURE__ */ new Set();
       const threads = Array.from(threadIds).map((id) => this.threads.get(id)).filter((thread) => thread !== void 0);
-      logger$7.info("Get threads by resource", { resourceId, count: threads.length });
+      logger$6.info("Get threads by resource", { resourceId, count: threads.length });
       span.setStatus({ code: 1 });
       return threads;
     } catch (error) {
-      logger$7.error("Failed to get threads by resource", { error });
+      logger$6.error("Failed to get threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -1594,16 +1614,16 @@ class ThreadManager {
     try {
       const threads = this.getThreadsByResource(resourceId);
       if (threads.length === 0) {
-        logger$7.info("No threads found for resource", { resourceId });
+        logger$6.info("No threads found for resource", { resourceId });
         span.setStatus({ code: 1 });
         return void 0;
       }
       const mostRecent = threads.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-      logger$7.info("Most recent thread", { resourceId, threadId: mostRecent.id });
+      logger$6.info("Most recent thread", { resourceId, threadId: mostRecent.id });
       span.setStatus({ code: 1 });
       return mostRecent;
     } catch (error) {
-      logger$7.error("Failed to get most recent thread", { error });
+      logger$6.error("Failed to get most recent thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -1622,16 +1642,16 @@ class ThreadManager {
     try {
       const existingThread = this.getMostRecentThread(resourceId);
       if (existingThread) {
-        logger$7.info("Found existing thread", { resourceId, threadId: existingThread.id });
+        logger$6.info("Found existing thread", { resourceId, threadId: existingThread.id });
         span.setStatus({ code: 1 });
         return existingThread;
       }
-      logger$7.info("No existing thread, creating new", { resourceId });
+      logger$6.info("No existing thread, creating new", { resourceId });
       const newThread = await this.createThread({ resourceId, metadata });
       span.setStatus({ code: 1 });
       return newThread;
     } catch (error) {
-      logger$7.error("Failed to get or create thread", { error });
+      logger$6.error("Failed to get or create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -1650,11 +1670,11 @@ class ThreadManager {
       const thread = this.threads.get(threadId);
       if (thread) {
         thread.lastReadAt = date;
-        logger$7.info("Marked thread as read", { threadId, date });
+        logger$6.info("Marked thread as read", { threadId, date });
       }
       span.setStatus({ code: 1 });
     } catch (error) {
-      logger$7.error("Failed to mark thread as read", { error });
+      logger$6.error("Failed to mark thread as read", { error });
       span.setStatus({ code: 2, message: String(error) });
     } finally {
       span.end();
@@ -1673,11 +1693,11 @@ class ThreadManager {
         const lastRead = this.threadReadStatus.get(thread.id);
         return !lastRead || thread.createdAt > lastRead;
       });
-      logger$7.info("Get unread threads by resource", { resourceId, count: unread.length });
+      logger$6.info("Get unread threads by resource", { resourceId, count: unread.length });
       span.setStatus({ code: 1 });
       return unread;
     } catch (error) {
-      logger$7.error("Failed to get unread threads by resource", { error });
+      logger$6.error("Failed to get unread threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -2710,81 +2730,6 @@ function generateSampleRewardRecords(agentId, episodeCount, actionsPerEpisode) {
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   );
 }
-
-const logger$6 = createLogger({ name: "memory-query-tool" });
-const includeMessageSchema = z.object({
-  id: z.string().describe("ID of the message to include."),
-  withPreviousMessages: z.number().int().nonnegative().optional().describe("Number of messages to include before this message."),
-  withNextMessages: z.number().int().nonnegative().optional().describe("Number of messages to include after this message.")
-});
-const memorySelectBySchema = z.object({
-  vectorSearchString: z.string().optional().describe("Search string for finding semantically similar messages."),
-  last: z.union([z.number().int().positive(), z.literal(false)]).optional().describe(
-    "Number of most recent messages to retrieve (or false to disable limit). Defaults influenced by memory config."
-  ),
-  include: z.array(includeMessageSchema).optional().describe(
-    "Array of specific message IDs to include, potentially with context."
-  )
-}).describe(
-  "Options for selecting which messages to retrieve from the thread."
-);
-const memoryQueryInputSchema = z.object({
-  threadId: z.string().describe("The unique identifier of the thread to retrieve messages from."),
-  selectBy: memorySelectBySchema.describe(
-    "Criteria for selecting messages (e.g., last N, semantic search, specific IDs)."
-  )
-  // resourceId: z.string().optional().describe("Optional ID of the resource owning the thread for validation."),
-  // threadConfig: z.any().optional().describe("Optional memory configuration overrides for this query."), // Type depends on MemoryConfig definition
-});
-const memoryQueryOutputSchema = z.object({
-  // Using z.unknown() for messages as CoreMessage structure might be complex or not fully defined here
-  messages: z.array(z.unknown()).describe("An array of message objects matching the query criteria.")
-  // uiMessages: z.array(z.unknown()).optional().describe("Optional array of messages formatted for UI display."), // Include if needed
-});
-const memoryQueryTool = createTool({
-  id: "memory-query",
-  // Unique ID for the tool
-  description: "Queries messages within a specific thread stored in the agent memory system based on criteria like recency, semantic similarity, or specific IDs.",
-  inputSchema: memoryQueryInputSchema,
-  outputSchema: memoryQueryOutputSchema,
-  execute: async ({ context }) => {
-    const { threadId, selectBy } = context;
-    logger$6.info(`Executing memory query for threadId: ${threadId}`, {
-      selectBy
-    });
-    if (!sharedMemory || typeof sharedMemory.query !== "function") {
-      logger$6.error(
-        "Memory system (sharedMemory) or its query method is not available."
-      );
-      throw new Error("Memory system or query method is not available.");
-    }
-    try {
-      const {
-        messages
-        /*, uiMessages */
-      } = await sharedMemory.query({
-        threadId,
-        selectBy
-        // resourceId, // Pass if needed/available
-        // threadConfig, // Pass if needed/available
-      });
-      const finalMessages = Array.isArray(messages) ? messages : [];
-      logger$6.info(
-        `Memory query successful for thread ${threadId}, returned ${finalMessages.length} messages.`
-      );
-      return { messages: finalMessages };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger$6.error(
-        `Memory query failed for thread ${threadId}: ${errorMessage}`,
-        { error }
-      );
-      throw new Error(
-        `Failed to query memory for thread ${threadId}: ${errorMessage}`
-      );
-    }
-  }
-});
 
 const analyzeContentTool = createTool({
   id: "analyze-content",
@@ -3926,403 +3871,6 @@ const graphRagQueryTool = createTool({
   }
 });
 
-const logger$3 = createLogger({ name: "llm-chain-tool", level: "info" });
-function createAiSdkModel(config = {}) {
-  switch (config.provider || "google") {
-    case "openai": {
-      const modelName = config.modelName || "gpt-4o";
-      return openai.chat(modelName, {});
-    }
-    case "google": {
-      const modelName = config.modelName || env.MODEL || "models/gemini-2.0-flash";
-      return google(modelName, {});
-    }
-    case "anthropic": {
-      const modelName = config.modelName || "claude-3-sonnet-20240229";
-      return anthropic(modelName, {});
-    }
-    default:
-      throw new Error(`Unsupported provider: ${config.provider}`);
-  }
-}
-const llmChainInputSchema = z.object({
-  promptTemplate: z.string().describe("The prompt template with {variables} to replace"),
-  variables: z.record(z.string()).describe("Key-value pairs to substitute in the template"),
-  provider: z.enum(["openai", "google", "anthropic"]).optional().describe("LLM provider to use"),
-  modelName: z.string().optional().describe("Specific model name to use"),
-  temperature: z.number().min(0).max(1).optional().describe("Creativity temperature (0-1)"),
-  maxTokens: z.number().optional().describe("Maximum tokens in response"),
-  useLangChain: z.boolean().optional().default(false).describe("Whether to use LangChain (true) or AI SDK (false)")
-});
-const llmChainTool = createAIFunction(
-  {
-    name: "llm-chain",
-    description: "Runs an LLM chain with a prompt template and variables",
-    inputSchema: llmChainInputSchema
-  },
-  async (context) => {
-    const startTime = Date.now();
-    const runId = await createLangSmithRun("llm-chain-tool", [
-      "llm-chain",
-      context.provider || "default"
-    ]);
-    try {
-      const {
-        promptTemplate,
-        variables,
-        provider = "google",
-        modelName,
-        temperature,
-        maxTokens,
-        useLangChain = false
-      } = context;
-      const llmConfig = {
-        provider,
-        modelName,
-        temperature,
-        maxTokens,
-        enableTracing: true
-      };
-      let result;
-      if (useLangChain) {
-        const chain = createLLMChain(promptTemplate, llmConfig);
-        const response = await chain.invoke(variables);
-        result = String(response);
-      } else {
-        const model = createAiSdkModel(llmConfig);
-        let prompt = promptTemplate;
-        for (const [key, value] of Object.entries(variables)) {
-          prompt = prompt.replace(new RegExp(`{${key}}`, "g"), String(value));
-        }
-        const messages = [{ role: "user", content: prompt }];
-        let response;
-        if (provider === "openai") {
-          const openAIModel = model;
-          response = await openAIModel.chat({ messages });
-          result = response.content;
-        } else if (provider === "anthropic") {
-          const anthropicModel = model;
-          response = await anthropicModel.messages({ messages });
-          result = response.content;
-        } else {
-          const googleModel = model;
-          response = await googleModel.generateContent({
-            contents: [{ role: "user", text: prompt }]
-          });
-          result = response.text;
-        }
-      }
-      const elapsedTimeMs = Date.now() - startTime;
-      await trackFeedback(runId, {
-        score: 1,
-        comment: `Successfully executed LLM chain in ${elapsedTimeMs}ms`,
-        key: "llm_chain_success"
-      });
-      return {
-        result,
-        success: true,
-        metadata: {
-          provider,
-          model: modelName || (provider === "google" ? "gemini" : provider === "openai" ? "gpt-4o" : "claude"),
-          elapsedTimeMs
-        }
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      console.error("LLM chain execution error:", error);
-      await trackFeedback(runId, {
-        score: 0,
-        comment: errorMessage,
-        key: "llm_chain_failure"
-      });
-      return {
-        result: "",
-        success: false,
-        metadata: {
-          provider: context.provider || "unknown",
-          model: context.modelName || "unknown",
-          elapsedTimeMs: Date.now() - startTime
-        },
-        error: errorMessage
-      };
-    }
-  }
-);
-console.log("llmChainTool:", llmChainTool);
-logger$3.info("Registered llmChainTool", { tool: llmChainTool });
-const aiSdkPromptInputSchema = z.object({
-  prompt: z.string().describe("The prompt to send to the model"),
-  provider: z.enum(["openai", "google", "anthropic"]).optional().describe("LLM provider to use"),
-  modelName: z.string().optional().describe("Specific model name to use"),
-  temperature: z.number().min(0).max(1).optional().describe("Creativity temperature (0-1)"),
-  maxTokens: z.number().optional().describe("Maximum tokens in response"),
-  schema: z.record(z.any()).optional().describe("JSON schema for structured output"),
-  systemPrompt: z.string().optional().describe("System prompt to use"),
-  history: z.array(
-    z.object({
-      role: z.enum(["user", "assistant", "system"]),
-      content: z.string()
-    })
-  ).optional().describe("Conversation history"),
-  // Add threadId and resourceId to the input schema if they are needed by the execute logic
-  threadId: z.string().optional().describe("Execution thread ID"),
-  resourceId: z.string().optional().describe("Resource ID for observability")
-});
-const aiSdkPromptTool = createAIFunction(
-  {
-    name: "ai-sdk-prompt",
-    description: "Runs a prompt through AI SDK with structured output support",
-    inputSchema: aiSdkPromptInputSchema
-  },
-  async (context) => {
-    const startTime = Date.now();
-    const runId = await createLangSmithRun("ai-sdk-prompt-tool", [
-      "ai-sdk",
-      context.provider || "default"
-    ]);
-    const executionThreadId = context.threadId;
-    const resourceId = context.resourceId;
-    try {
-      const {
-        prompt,
-        provider = "google",
-        modelName,
-        schema,
-        systemPrompt,
-        history = []
-      } = context;
-      const llmConfig = {
-        provider,
-        modelName};
-      const model = createAiSdkModel(llmConfig);
-      const messages = [];
-      if (systemPrompt) {
-        messages.push({ role: "system", content: systemPrompt });
-      }
-      if (history.length > 0) {
-        messages.push(...history);
-      }
-      messages.push({ role: "user", content: prompt });
-      let text;
-      let structured = void 0;
-      let response;
-      if (provider === "openai") {
-        const options = { messages };
-        if (executionThreadId) {
-          options.thread_id = executionThreadId;
-        }
-        if (resourceId) {
-          options.metadata = {
-            ...options.metadata || {},
-            resourceId
-          };
-        }
-        if (schema) {
-          options.tools = [
-            {
-              type: "function",
-              function: {
-                name: "output_formatter",
-                description: "Format output according to schema",
-                parameters: schema
-              }
-            }
-          ];
-          options.tool_choice = {
-            type: "function",
-            function: { name: "output_formatter" }
-          };
-        }
-        const openAIModel = model;
-        response = await openAIModel.chat(options);
-        if (schema && response.tool_calls?.length > 0) {
-          try {
-            structured = JSON.parse(response.tool_calls[0].function.arguments);
-            text = JSON.stringify(structured, null, 2);
-          } catch (e) {
-            console.warn("Failed to parse OpenAI tool call response:", e);
-            text = response.content || "";
-          }
-        } else {
-          text = response.content || "";
-        }
-      } else if (provider === "anthropic") {
-        const options = { messages };
-        if (executionThreadId) {
-          options.threadId = executionThreadId;
-        }
-        if (resourceId) {
-          options.metadata = {
-            ...options.metadata || {},
-            resourceId
-          };
-        }
-        if (schema) {
-          options.tools = [
-            {
-              name: "output_formatter",
-              description: "Format output according to schema",
-              parameters: schema
-            }
-          ];
-          options.tool_choice = {
-            type: "function",
-            function: { name: "output_formatter" }
-          };
-          const anthropicModel = model;
-          response = await anthropicModel.messages(options);
-          if (response.tool_calls && response.tool_calls.length > 0) {
-            try {
-              structured = JSON.parse(
-                response.tool_calls[0].function.arguments
-              );
-              text = JSON.stringify(structured, null, 2);
-            } catch (e) {
-              console.warn("Failed to parse Claude tool call response:", e);
-              text = response.content || "";
-            }
-          } else {
-            text = response.content || "";
-          }
-        } else {
-          const anthropicModel = model;
-          response = await anthropicModel.messages(options);
-          text = response.content || "";
-        }
-      } else {
-        const options = {
-          contents: messages.map((m) => ({
-            role: m.role,
-            parts: [{ text: m.content }]
-          }))
-        };
-        if (executionThreadId) {
-          options.threadId = executionThreadId;
-        }
-        if (resourceId) {
-          options.metadata = {
-            ...options.metadata || {},
-            resourceId
-          };
-        }
-        if (schema) {
-          options.tools = [
-            {
-              functionDeclarations: [
-                {
-                  name: "output_formatter",
-                  description: "Format output according to schema",
-                  parameters: schema
-                }
-              ]
-            }
-          ];
-          options.toolConfig = {
-            functionCallingConfig: {
-              mode: "AUTO",
-              allowedFunctionNames: ["output_formatter"]
-            }
-          };
-        }
-        const googleModel = model;
-        response = await googleModel.generateContent(options);
-        if (schema && response.candidates && response.candidates[0]?.content?.parts?.length > 0) {
-          const functionCallPart = response.candidates[0].content.parts.find(
-            (part) => part.functionCall
-          );
-          if (functionCallPart?.functionCall) {
-            try {
-              structured = JSON.parse(functionCallPart.functionCall.args);
-              text = JSON.stringify(structured, null, 2);
-            } catch (e) {
-              console.warn("Failed to parse Google function call response:", e);
-              text = response.text || "";
-            }
-          } else {
-            text = response.text || "";
-          }
-        } else if (response.candidates?.[0]?.content?.parts?.[0]?.text) {
-          text = response.candidates[0].content.parts[0].text;
-        } else {
-          text = response.text || "";
-        }
-      }
-      const elapsedTimeMs = Date.now() - startTime;
-      await trackFeedback(runId, {
-        score: 1,
-        comment: `Successfully executed AI SDK prompt in ${elapsedTimeMs}ms`,
-        key: "ai_sdk_success"
-      });
-      return {
-        text,
-        structured,
-        success: true,
-        metadata: {
-          provider,
-          model: modelName || (provider === "google" ? "gemini" : provider === "openai" ? "gpt-4o" : "claude"),
-          elapsedTimeMs
-        }
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      console.error("AI SDK prompt execution error:", error);
-      await trackFeedback(runId, {
-        score: 0,
-        comment: errorMessage,
-        key: "ai_sdk_failure"
-      });
-      return {
-        text: "",
-        success: false,
-        metadata: {
-          provider: context.provider || "unknown",
-          model: context.modelName || "unknown",
-          elapsedTimeMs: Date.now() - startTime
-        },
-        error: errorMessage
-      };
-    }
-  }
-);
-const LLMChainOutputSchema = z.object({
-  result: z.string().describe("The final string output from the LLM chain."),
-  success: z.boolean().describe("Indicates if the chain execution was successful."),
-  metadata: z.object({
-    provider: z.string(),
-    model: z.string(),
-    elapsedTimeMs: z.number()
-  }).passthrough().describe("Execution metadata."),
-  error: z.string().optional().describe("Error message if execution failed.")
-}).describe("Schema for the output of the llm-chain tool");
-const AiSdkPromptOutputSchema = z.object({
-  text: z.string().describe("The primary text output from the AI SDK call."),
-  structured: z.unknown().optional().describe("Parsed structured output object if a schema was provided."),
-  success: z.boolean().describe("Indicates if the AI SDK call was successful."),
-  metadata: z.object({
-    provider: z.string(),
-    model: z.string(),
-    elapsedTimeMs: z.number(),
-    usage: z.object({
-      promptTokens: z.number().int().optional(),
-      completionTokens: z.number().int().optional(),
-      totalTokens: z.number().int().optional()
-    }).optional(),
-    finishReason: z.string().optional(),
-    rawResponse: z.any().optional()
-  }).passthrough().describe("Execution metadata."),
-  error: z.string().optional().describe("Error message if execution failed.")
-}).describe("Schema for the output of the ai-sdk-prompt tool");
-function createMastraLLMChainTools() {
-  const mastraTools = createMastraTools(llmChainTool, aiSdkPromptTool);
-  if (mastraTools["llm-chain"]) {
-    mastraTools["llm-chain"].outputSchema = LLMChainOutputSchema;
-  }
-  if (mastraTools["ai-sdk-prompt"]) {
-    mastraTools["ai-sdk-prompt"].outputSchema = AiSdkPromptOutputSchema;
-  }
-  return mastraTools;
-}
-
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -4689,7 +4237,7 @@ const github = new GithubIntegration({
   }
 });
 
-const logger$2 = createLogger({ name: "evals", level: "info" });
+const logger$3 = createLogger({ name: "evals", level: "info" });
 function getEvalModelId() {
   return process.env.EVAL_MODEL_ID || "models/gemini-2.0-flashlite";
 }
@@ -5155,12 +4703,12 @@ const faithfulnessEvalTool = createTool({
       const explanation = `Matched ${matched} of ${facts.length} reference facts.`;
       signoz.recordMetrics(span, { latencyMs: performance.now() - startTime, status: "success" });
       span.end();
-      logger$2.info("Faithfulness eval result", { score, explanation, response: context.response });
+      logger$3.info("Faithfulness eval result", { score, explanation, response: context.response });
       return { score, explanation, success: true };
     } catch (error) {
       signoz.recordMetrics(span, { latencyMs: performance.now() - startTime, status: "error", errorMessage: error instanceof Error ? error.message : String(error) });
       span.end();
-      logger$2.error("Faithfulness eval error", { error });
+      logger$3.error("Faithfulness eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -5198,12 +4746,12 @@ const biasEvalTool = createTool({
       const found = biasKeywords.filter((k) => lower.includes(k));
       const score = found.length > 0 ? Math.min(1, found.length * 0.3) : 0;
       const explanation = found.length > 0 ? `Detected possible bias: ${found.join(", ")}` : "No obvious bias detected.";
-      logger$2.info("Bias eval result", { score, explanation, response: context.response });
+      logger$3.info("Bias eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$2.error("Bias eval error", { error });
+      logger$3.error("Bias eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -5242,12 +4790,12 @@ const toxicityEvalTool = createTool({
       const found = toxicKeywords.filter((k) => lower.includes(k));
       const score = found.length > 0 ? Math.min(1, found.length * 0.2) : 0;
       const explanation = found.length > 0 ? `Detected possible toxicity: ${found.join(", ")}` : "No obvious toxicity detected.";
-      logger$2.info("Toxicity eval result", { score, explanation, response: context.response });
+      logger$3.info("Toxicity eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$2.error("Toxicity eval error", { error });
+      logger$3.error("Toxicity eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -5279,12 +4827,12 @@ const hallucinationEvalTool = createTool({
       }
       const score = sentences.length > 0 ? hallucinated / sentences.length : 0;
       const explanation = hallucinated > 0 ? `${hallucinated} of ${sentences.length} sentences may be hallucinated.` : "No obvious hallucinations detected.";
-      logger$2.info("Hallucination eval result", { score, explanation, response: context.response });
+      logger$3.info("Hallucination eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$2.error("Hallucination eval error", { error });
+      logger$3.error("Hallucination eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -5312,75 +4860,76 @@ const summarizationEvalTool = createTool({
       const brevity = 1 - Math.min(1, context.summary.length / (context.reference.length || 1));
       const score = Math.max(0, Math.min(1, coverage * 0.7 + brevity * 0.3));
       const explanation = `Coverage: ${(coverage * 100).toFixed(0)}%, Brevity: ${(brevity * 100).toFixed(0)}%`;
-      logger$2.info("Summarization eval result", { score, explanation, summary: context.summary });
+      logger$3.info("Summarization eval result", { score, explanation, summary: context.summary });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$2.error("Summarization eval error", { error });
+      logger$3.error("Summarization eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 });
 
-const logger$1 = createLogger({ name: "opentelemetry-tracing", level: "info" });
+const logger$2 = createLogger({ name: "opentelemetry-tracing", level: "info" });
 function initOpenTelemetry({
   serviceName = "deanmachines-ai",
   serviceVersion = "1.0.0",
   environment = "development",
   enabled = true,
-  endpoint
+  endpoint,
+  metricsEnabled = true,
+  metricsIntervalMs = 6e4
 }) {
   if (!enabled) {
-    logger$1.info("OpenTelemetry tracing is disabled");
+    logger$2.info("OpenTelemetry tracing is disabled");
     return null;
   }
+  const exporterUrl = endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4317/v1/traces";
+  const traceExporter = new OTLPTraceExporter({ url: exporterUrl });
+  const resource = resourceFromAttributes({
+    [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
+    [SemanticResourceAttributes.SERVICE_VERSION]: serviceVersion,
+    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: environment
+  });
+  const sdkConfig = {
+    resource,
+    traceExporter,
+    instrumentations: [getNodeAutoInstrumentations()]
+  };
+  if (metricsEnabled) {
+    const metricExporter = new OTLPMetricExporter({
+      url: exporterUrl.replace("/v1/traces", "/v1/metrics")
+    });
+    const metricReader = new PeriodicExportingMetricReader({
+      exporter: metricExporter,
+      exportIntervalMillis: metricsIntervalMs
+    });
+    sdkConfig.metricReader = metricReader;
+    logger$2.info("OpenTelemetry metrics enabled");
+  }
+  const sdk = new NodeSDK(sdkConfig);
   try {
-    logger$1.info(`Initializing OpenTelemetry for service: ${serviceName}`, { environment });
-    const exporterUrl = endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4317/v1/traces";
-    const traceExporter = new OTLPTraceExporter({
-      url: exporterUrl
+    sdk.start();
+    logger$2.info("OpenTelemetry SDK initialized successfully");
+  } catch (initError) {
+    logger$2.error("Error initializing OpenTelemetry SDK", {
+      error: initError instanceof Error ? initError.message : String(initError)
     });
-    const resource = resourceFromAttributes({
-      [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
-      [SemanticResourceAttributes.SERVICE_VERSION]: serviceVersion,
-      [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: environment
-    });
-    const sdk = new NodeSDK({
-      resource,
-      traceExporter,
-      instrumentations: [getNodeAutoInstrumentations()]
-    });
-    try {
-      sdk.start();
-      logger$1.info("OpenTelemetry SDK initialized successfully");
-    } catch (initError) {
-      logger$1.error("Error initializing OpenTelemetry SDK", {
-        error: initError instanceof Error ? initError.message : String(initError)
-      });
-    }
-    process$1.on("SIGTERM", () => {
-      if (sdk) {
-        try {
-          sdk.shutdown();
-          logger$1.info("OpenTelemetry SDK shut down successfully");
-        } catch (shutdownError) {
-          logger$1.error("Error shutting down OpenTelemetry SDK", {
-            error: shutdownError instanceof Error ? shutdownError.message : String(shutdownError)
-          });
-        } finally {
-          process$1.exit(0);
-        }
-      }
-    });
-    return sdk;
-  } catch (error) {
-    logger$1.error("Failed to initialize OpenTelemetry", {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : void 0
-    });
-    return null;
   }
+  process$1.on("SIGTERM", async () => {
+    try {
+      await sdk.shutdown();
+      logger$2.info("OpenTelemetry SDK shut down successfully");
+    } catch (shutdownError) {
+      logger$2.error("Error shutting down OpenTelemetry SDK", {
+        error: shutdownError instanceof Error ? shutdownError.message : String(shutdownError)
+      });
+    } finally {
+      process$1.exit(0);
+    }
+  });
+  return sdk;
 }
 let sdkInstance = null;
 function getOpenTelemetrySdk() {
@@ -5525,166 +5074,401 @@ const calculatorTool = createTool({
   }
 });
 
-async function paginate(input) {
-  const acc = [];
-  let cursor;
-  while (acc.length < input.size) {
-    const { data, nextCursor } = await input.handler({
-      cursor,
-      limit: input.size - acc.length
-    });
-    acc.push(...data);
-    if (nextCursor === void 0 || data.length === 0) {
-      break;
+const logger$1 = createLogger({ name: "llm-chain-tool", level: "info" });
+function createAiSdkModel(config = {}) {
+  switch (config.provider || "google") {
+    case "openai": {
+      const modelName = config.modelName || "gpt-4o";
+      return openai.chat(modelName, {});
     }
-    cursor = nextCursor;
+    case "google": {
+      const modelName = config.modelName || env.MODEL || "models/gemini-2.0-flash";
+      return google(modelName, {});
+    }
+    case "anthropic": {
+      const modelName = config.modelName || "claude-3-sonnet-20240229";
+      return anthropic(modelName, {});
+    }
+    default:
+      throw new Error(`Unsupported provider: ${config.provider}`);
   }
-  if (acc.length > input.size) {
-    acc.length = input.size;
-  }
-  return acc;
 }
-
-class McpTools extends AIFunctionsProvider {
-  name;
-  client;
-  rawToolResponses;
-  _toolsMap;
-  _toolsFilter;
-  constructor({
-    name,
-    client,
-    toolsFilter,
-    rawToolResponses = false
-  }) {
-    super();
-    this.name = name;
-    this.client = client;
-    this.rawToolResponses = rawToolResponses;
-    this._toolsFilter = toolsFilter;
-  }
-  get functions() {
-    assert(this._functions);
-    return this._functions;
-  }
-  /**
-   * Initialize the McpTools instance by fetching all available tools from the MCP client.
-   * This method must be called before using this class' tools.
-   * It is called automatically when using `McpTools.from()`.
-   */
-  async _init() {
-    const capabilties = this.client.getServerCapabilities();
-    const initPromises = [];
-    if (capabilties?.tools) {
-      initPromises.push(this._initTools());
-    }
-    await Promise.all(initPromises);
-  }
-  async _initTools() {
-    const tools = await paginate({
-      size: Infinity,
-      handler: async ({ cursor }) => {
-        const { tools: tools2, nextCursor } = await this.client.listTools({ cursor });
-        return { data: tools2, nextCursor };
+const llmChainInputSchema = z.object({
+  promptTemplate: z.string().describe("The prompt template with {variables} to replace"),
+  variables: z.record(z.string()).describe("Key-value pairs to substitute in the template"),
+  provider: z.enum(["openai", "google", "anthropic"]).optional().describe("LLM provider to use"),
+  modelName: z.string().optional().describe("Specific model name to use"),
+  temperature: z.number().min(0).max(1).optional().describe("Creativity temperature (0-1)"),
+  maxTokens: z.number().optional().describe("Maximum tokens in response"),
+  useLangChain: z.boolean().optional().default(false).describe("Whether to use LangChain (true) or AI SDK (false)")
+});
+const llmChainTool = createAIFunction(
+  {
+    name: "llm-chain",
+    description: "Runs an LLM chain with a prompt template and variables",
+    inputSchema: llmChainInputSchema
+  },
+  async (context) => {
+    const startTime = Date.now();
+    const runId = await createLangSmithRun("llm-chain-tool", [
+      "llm-chain",
+      context.provider || "default"
+    ]);
+    try {
+      const {
+        promptTemplate,
+        variables,
+        provider = "google",
+        modelName,
+        temperature,
+        maxTokens,
+        useLangChain = false
+      } = context;
+      const llmConfig = {
+        provider,
+        modelName,
+        temperature,
+        maxTokens,
+        enableTracing: true
+      };
+      let result;
+      if (useLangChain) {
+        const chain = createLLMChain(promptTemplate, llmConfig);
+        const response = await chain.invoke(variables);
+        result = String(response);
+      } else {
+        const model = createAiSdkModel(llmConfig);
+        let prompt = promptTemplate;
+        for (const [key, value] of Object.entries(variables)) {
+          prompt = prompt.replace(new RegExp(`{${key}}`, "g"), String(value));
+        }
+        const messages = [{ role: "user", content: prompt }];
+        let response;
+        if (provider === "openai") {
+          const openAIModel = model;
+          response = await openAIModel.chat({ messages });
+          result = response.content;
+        } else if (provider === "anthropic") {
+          const anthropicModel = model;
+          response = await anthropicModel.messages({ messages });
+          result = response.content;
+        } else {
+          const googleModel = model;
+          response = await googleModel.generateContent({
+            contents: [{ role: "user", text: prompt }]
+          });
+          result = response.text;
+        }
       }
-    });
-    const enabledTools = this._toolsFilter ? tools.filter((tool) => this._toolsFilter(tool.name)) : tools;
-    this._toolsMap = new Map(enabledTools.map((tool) => [tool.name, tool]));
-    this._updateFunctions();
+      const elapsedTimeMs = Date.now() - startTime;
+      await trackFeedback(runId, {
+        score: 1,
+        comment: `Successfully executed LLM chain in ${elapsedTimeMs}ms`,
+        key: "llm_chain_success"
+      });
+      return {
+        result,
+        success: true,
+        metadata: {
+          provider,
+          model: modelName || (provider === "google" ? "gemini" : provider === "openai" ? "gpt-4o" : "claude"),
+          elapsedTimeMs
+        }
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      console.error("LLM chain execution error:", error);
+      await trackFeedback(runId, {
+        score: 0,
+        comment: errorMessage,
+        key: "llm_chain_failure"
+      });
+      return {
+        result: "",
+        success: false,
+        metadata: {
+          provider: context.provider || "unknown",
+          model: context.modelName || "unknown",
+          elapsedTimeMs: Date.now() - startTime
+        },
+        error: errorMessage
+      };
+    }
   }
-  _updateFunctions() {
-    assert(this._toolsMap);
-    this._functions = new AIFunctionSet(
-      Array.from(this._toolsMap.entries()).map(([_name, tool]) => {
-        return createAIFunction(
-          {
-            name: `${this.name}_${tool.name}`,
-            description: tool.description ?? `${this.name} ${tool.name}`,
-            inputSchema: createJsonSchema(tool.inputSchema),
-            strict: true
-          },
-          async (args) => {
-            const result = await this.client.callTool({
-              name: tool.name,
-              arguments: args
-            });
-            if (this.rawToolResponses) {
-              return result;
+);
+console.log("llmChainTool:", llmChainTool);
+logger$1.info("Registered llmChainTool", { tool: llmChainTool });
+const aiSdkPromptInputSchema = z.object({
+  prompt: z.string().describe("The prompt to send to the model"),
+  provider: z.enum(["openai", "google", "anthropic"]).optional().describe("LLM provider to use"),
+  modelName: z.string().optional().describe("Specific model name to use"),
+  temperature: z.number().min(0).max(1).optional().describe("Creativity temperature (0-1)"),
+  maxTokens: z.number().optional().describe("Maximum tokens in response"),
+  schema: z.record(z.any()).optional().describe("JSON schema for structured output"),
+  systemPrompt: z.string().optional().describe("System prompt to use"),
+  history: z.array(
+    z.object({
+      role: z.enum(["user", "assistant", "system"]),
+      content: z.string()
+    })
+  ).optional().describe("Conversation history"),
+  // Add threadId and resourceId to the input schema if they are needed by the execute logic
+  threadId: z.string().optional().describe("Execution thread ID"),
+  resourceId: z.string().optional().describe("Resource ID for observability")
+});
+const aiSdkPromptTool = createAIFunction(
+  {
+    name: "ai-sdk-prompt",
+    description: "Runs a prompt through AI SDK with structured output support",
+    inputSchema: aiSdkPromptInputSchema
+  },
+  async (context) => {
+    const startTime = Date.now();
+    const runId = await createLangSmithRun("ai-sdk-prompt-tool", [
+      "ai-sdk",
+      context.provider || "default"
+    ]);
+    const executionThreadId = context.threadId;
+    const resourceId = context.resourceId;
+    try {
+      const {
+        prompt,
+        provider = "google",
+        modelName,
+        schema,
+        systemPrompt,
+        history = []
+      } = context;
+      const llmConfig = {
+        provider,
+        modelName};
+      const model = createAiSdkModel(llmConfig);
+      const messages = [];
+      if (systemPrompt) {
+        messages.push({ role: "system", content: systemPrompt });
+      }
+      if (history.length > 0) {
+        messages.push(...history);
+      }
+      messages.push({ role: "user", content: prompt });
+      let text;
+      let structured = void 0;
+      let response;
+      if (provider === "openai") {
+        const options = { messages };
+        if (executionThreadId) {
+          options.thread_id = executionThreadId;
+        }
+        if (resourceId) {
+          options.metadata = {
+            ...options.metadata || {},
+            resourceId
+          };
+        }
+        if (schema) {
+          options.tools = [
+            {
+              type: "function",
+              function: {
+                name: "output_formatter",
+                description: "Format output according to schema",
+                parameters: schema
+              }
             }
-            return processToolCallResult(result);
+          ];
+          options.tool_choice = {
+            type: "function",
+            function: { name: "output_formatter" }
+          };
+        }
+        const openAIModel = model;
+        response = await openAIModel.chat(options);
+        if (schema && response.tool_calls?.length > 0) {
+          try {
+            structured = JSON.parse(response.tool_calls[0].function.arguments);
+            text = JSON.stringify(structured, null, 2);
+          } catch (e) {
+            console.warn("Failed to parse OpenAI tool call response:", e);
+            text = response.content || "";
           }
-        );
-      })
-    );
-  }
-  async callTool(name, args) {
-    const tool = this._toolsMap?.get(name) ?? this._toolsMap?.get(`${this.name}_${name}`);
-    assert(tool, `Tool ${name} not found`);
-    const result = await this.client.callTool({ name, arguments: args });
-    return result;
-  }
-  /**
-   * Creates a new McpTools instance from an existing, fully initialized
-   * MCP client.
-   *
-   * You probably want to use `createMcpTool` instead, which makes initializing
-   * the MCP client and connecting to its transport easier.
-   *
-   * All tools within the `McpTools` instance will be namespaced under the given
-   * `name`.
-   */
-  static async fromMcpClient(params) {
-    const mcpTools = new McpTools(params);
-    await mcpTools._init();
-    return mcpTools;
-  }
-}
-async function createMcpTools(params) {
-  const transport = await createMcpTransport(params);
-  const client = new Client$1(
-    { name: params.name, version: params.version || "1.0.0" },
-    { capabilities: {} }
-  );
-  await client.connect(transport);
-  return McpTools.fromMcpClient({ client, ...params });
-}
-async function createMcpTransport(params) {
-  if (params.transport) return params.transport;
-  if (params.serverUrl) {
-    const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
-    return new SSEClientTransport(new URL(params.serverUrl));
-  }
-  if (params.serverProcess) {
-    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
-    return new StdioClientTransport(params.serverProcess);
-  }
-  throw new Error(
-    "Unable to create a server connection with supplied options. Must provide transport, stdio, or sseUrl."
-  );
-}
-function toText(c) {
-  return c.map((p) => p.text || "").join("");
-}
-function processToolCallResult(result) {
-  if (result.isError) return { error: toText(result.content) };
-  if (result.content.every((c) => !!c.text)) {
-    const text = toText(result.content);
-    if (text.trim().startsWith("{") || text.trim().startsWith("[")) {
-      try {
-        return JSON.parse(text);
-      } catch {
-        return text;
+        } else {
+          text = response.content || "";
+        }
+      } else if (provider === "anthropic") {
+        const options = { messages };
+        if (executionThreadId) {
+          options.threadId = executionThreadId;
+        }
+        if (resourceId) {
+          options.metadata = {
+            ...options.metadata || {},
+            resourceId
+          };
+        }
+        if (schema) {
+          options.tools = [
+            {
+              name: "output_formatter",
+              description: "Format output according to schema",
+              parameters: schema
+            }
+          ];
+          options.tool_choice = {
+            type: "function",
+            function: { name: "output_formatter" }
+          };
+          const anthropicModel = model;
+          response = await anthropicModel.messages(options);
+          if (response.tool_calls && response.tool_calls.length > 0) {
+            try {
+              structured = JSON.parse(
+                response.tool_calls[0].function.arguments
+              );
+              text = JSON.stringify(structured, null, 2);
+            } catch (e) {
+              console.warn("Failed to parse Claude tool call response:", e);
+              text = response.content || "";
+            }
+          } else {
+            text = response.content || "";
+          }
+        } else {
+          const anthropicModel = model;
+          response = await anthropicModel.messages(options);
+          text = response.content || "";
+        }
+      } else {
+        const options = {
+          contents: messages.map((m) => ({
+            role: m.role,
+            parts: [{ text: m.content }]
+          }))
+        };
+        if (executionThreadId) {
+          options.threadId = executionThreadId;
+        }
+        if (resourceId) {
+          options.metadata = {
+            ...options.metadata || {},
+            resourceId
+          };
+        }
+        if (schema) {
+          options.tools = [
+            {
+              functionDeclarations: [
+                {
+                  name: "output_formatter",
+                  description: "Format output according to schema",
+                  parameters: schema
+                }
+              ]
+            }
+          ];
+          options.toolConfig = {
+            functionCallingConfig: {
+              mode: "AUTO",
+              allowedFunctionNames: ["output_formatter"]
+            }
+          };
+        }
+        const googleModel = model;
+        response = await googleModel.generateContent(options);
+        if (schema && response.candidates && response.candidates[0]?.content?.parts?.length > 0) {
+          const functionCallPart = response.candidates[0].content.parts.find(
+            (part) => part.functionCall
+          );
+          if (functionCallPart?.functionCall) {
+            try {
+              structured = JSON.parse(functionCallPart.functionCall.args);
+              text = JSON.stringify(structured, null, 2);
+            } catch (e) {
+              console.warn("Failed to parse Google function call response:", e);
+              text = response.text || "";
+            }
+          } else {
+            text = response.text || "";
+          }
+        } else if (response.candidates?.[0]?.content?.parts?.[0]?.text) {
+          text = response.candidates[0].content.parts[0].text;
+        } else {
+          text = response.text || "";
+        }
       }
+      const elapsedTimeMs = Date.now() - startTime;
+      await trackFeedback(runId, {
+        score: 1,
+        comment: `Successfully executed AI SDK prompt in ${elapsedTimeMs}ms`,
+        key: "ai_sdk_success"
+      });
+      return {
+        text,
+        structured,
+        success: true,
+        metadata: {
+          provider,
+          model: modelName || (provider === "google" ? "gemini" : provider === "openai" ? "gpt-4o" : "claude"),
+          elapsedTimeMs
+        }
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      console.error("AI SDK prompt execution error:", error);
+      await trackFeedback(runId, {
+        score: 0,
+        comment: errorMessage,
+        key: "ai_sdk_failure"
+      });
+      return {
+        text: "",
+        success: false,
+        metadata: {
+          provider: context.provider || "unknown",
+          model: context.modelName || "unknown",
+          elapsedTimeMs: Date.now() - startTime
+        },
+        error: errorMessage
+      };
     }
-    return text;
   }
-  if (result.content.length === 1) return result.content[0];
-  return result;
-}
-async function createMastraMcpTools(params) {
-  const mcpTools = await createMcpTools(params);
-  const mastraToolsMap = createMastraTools(mcpTools);
-  return Object.values(mastraToolsMap);
+);
+const LLMChainOutputSchema = z.object({
+  result: z.string().describe("The final string output from the LLM chain."),
+  success: z.boolean().describe("Indicates if the chain execution was successful."),
+  metadata: z.object({
+    provider: z.string(),
+    model: z.string(),
+    elapsedTimeMs: z.number()
+  }).passthrough().describe("Execution metadata."),
+  error: z.string().optional().describe("Error message if execution failed.")
+}).describe("Schema for the output of the llm-chain tool");
+const AiSdkPromptOutputSchema = z.object({
+  text: z.string().describe("The primary text output from the AI SDK call."),
+  structured: z.unknown().optional().describe("Parsed structured output object if a schema was provided."),
+  success: z.boolean().describe("Indicates if the AI SDK call was successful."),
+  metadata: z.object({
+    provider: z.string(),
+    model: z.string(),
+    elapsedTimeMs: z.number(),
+    usage: z.object({
+      promptTokens: z.number().int().optional(),
+      completionTokens: z.number().int().optional(),
+      totalTokens: z.number().int().optional()
+    }).optional(),
+    finishReason: z.string().optional(),
+    rawResponse: z.any().optional()
+  }).passthrough().describe("Execution metadata."),
+  error: z.string().optional().describe("Error message if execution failed.")
+}).describe("Schema for the output of the ai-sdk-prompt tool");
+function createMastraLLMChainTools() {
+  const mastraTools = createMastraTools(llmChainTool, aiSdkPromptTool);
+  if (mastraTools["llm-chain"]) {
+    mastraTools["llm-chain"].outputSchema = LLMChainOutputSchema;
+  }
+  if (mastraTools["ai-sdk-prompt"]) {
+    mastraTools["ai-sdk-prompt"].outputSchema = AiSdkPromptOutputSchema;
+  }
+  return mastraTools;
 }
 
 const logger = createLogger({
@@ -5925,16 +5709,6 @@ try {
   });
 }
 try {
-  const llmChainToolsObject = createMastraLLMChainTools();
-  const llmChainToolsArray = Object.values(llmChainToolsObject);
-  extraTools.push(...llmChainToolsArray.map((tool) => tool));
-  logger.info(`Added ${llmChainToolsArray.length} LLM Chain tools.`);
-} catch (error) {
-  logger.error("Failed to initialize LLM Chain tools:", {
-    error
-  });
-}
-try {
   const githubToolsObject = createMastraGitHubTools();
   const githubToolsArray = Object.values(githubToolsObject);
   extraTools.push(...githubToolsArray.map((tool) => tool));
@@ -5953,7 +5727,7 @@ const toolGroups = {
   search: optionalTools,
   vector: [vectorQueryTool, googleVectorQueryTool, filteredQueryTool],
   file: [readFileTool, writeToFileTool],
-  memory: [memoryQueryTool],
+  memory: [vectorQueryTool],
   rl: [collectFeedbackTool, analyzeFeedbackTool, applyRLInsightsTool, calculateRewardTool, defineRewardFunctionTool, optimizePolicyTool],
   content: additionalTools.filter((t) => ["analyzeContentTool", "formatContentTool"].includes(t.id)),
   document: additionalTools.filter((t) => ["searchDocumentsTool", "embedDocumentTool"].includes(t.id)),
@@ -5970,4 +5744,4 @@ logger.info(`E2B tools included: ${extraTools.some((t) => t.id.startsWith("e2b_"
 logger.info(`Arxiv tools included: ${extraTools.some((t) => t.id.startsWith("arxiv_"))}`);
 logger.info(`AI SDK tools included: ${extraTools.some((t) => t.id.startsWith("ai-sdk_"))}`);
 
-export { AiSdkPromptOutputSchema, ArXivClient, ArxivSearchEntrySchema, ArxivSearchOutputSchema, E2BOutputSchema, createExaSearchProvider as ExaSearchOutputSchema, ExaSearchProvider, FeedbackType, FileEncoding, FileWriteMode, GitHubBranchSchema, GitHubBranchesListSchema, GitHubClient, GitHubCodeSearchItemSchema, GitHubCodeSearchResultsSchema, GitHubCommitSchema, GitHubCommitsListSchema, GitHubIssueSchema, GitHubIssuesListSchema, GitHubPullSchema, GitHubPullsListSchema, GitHubReleaseSchema, GitHubReleasesListSchema, GitHubRepoSchema, GitHubReposListSchema, GitHubUserSchema, LLMChainOutputSchema, McpTools, RewardType, WikipediaClient, WikipediaPageResultSchema, WikipediaSearchSchema, WikipediaSummarySchema, WikipediaThumbnailSchema, aiSdkPromptTool, allTools, allToolsMap, analyzeContentTool, analyzeFeedbackTool, applyRLInsightsTool, arxiv, calculateRewardTool, calculatorTool as calculator, collectFeedbackTool, createAISDKTools, createAISpan, createArxivClient, createBraveSearchTool, createE2BSandboxTool, createExaSearchProvider, createFileTool, createGitHubClient, createGoogleSearchTool, createGraphRagTool, createHttpSpan, createLlamaIndexTools, createMastraAISDKTools, createMastraArxivTools, createMastraE2BTools, createMastraExaSearchTools, createMastraGitHubTools, createMastraLLMChainTools, createMastraLlamaIndexTools, createMastraMcpTools, createMastraVectorQueryTool, createMastraWikipediaTools, createMcpTools, createMcpTransport, createTavilySearchTool, createWikipediaClient, csvReaderTool, allToolsMap as default, defineRewardFunctionTool, deleteFileTool, docxReaderTool, e2b, editFileTool, embedDocumentTool, extractHtmlTextTool, filteredQueryTool, formatContentTool, getMainBranchRef, getOpenTelemetrySdk, getTracer, getUnreadFeedbackThreads, googleVectorQueryTool, graphRagQueryTool, toolGroups as groups, initOpenTelemetry, initOpenTelemetryTool, initSigNoz, initializeDefaultTracing, jsonReaderTool, listFilesTool, llmChainTool, memoryQueryTool, optimizePolicyTool, readFileTool, readKnowledgeFileTool, recordLlmMetrics, recordLlmMetricsTool, recordMetrics, searchDocumentsTool, shutdownSigNoz, shutdownTracingTool, startAISpanTool, toolGroups, allToolsMap as toolMap, tracingTools, vectorQueryTool, wikipedia, writeKnowledgeFileTool, writeToFileTool };
+export { AiSdkPromptOutputSchema, ArXivClient, ArxivSearchEntrySchema, ArxivSearchOutputSchema, E2BOutputSchema, createExaSearchProvider as ExaSearchOutputSchema, ExaSearchProvider, FeedbackType, FileEncoding, FileWriteMode, GitHubBranchSchema, GitHubBranchesListSchema, GitHubClient, GitHubCodeSearchItemSchema, GitHubCodeSearchResultsSchema, GitHubCommitSchema, GitHubCommitsListSchema, GitHubIssueSchema, GitHubIssuesListSchema, GitHubPullSchema, GitHubPullsListSchema, GitHubReleaseSchema, GitHubReleasesListSchema, GitHubRepoSchema, GitHubReposListSchema, GitHubUserSchema, LLMChainOutputSchema, RewardType, WikipediaClient, WikipediaPageResultSchema, WikipediaSearchSchema, WikipediaSummarySchema, WikipediaThumbnailSchema, aiSdkPromptTool, allTools, allToolsMap, analyzeContentTool, analyzeFeedbackTool, applyRLInsightsTool, arxiv, calculateRewardTool, calculatorTool as calculator, collectFeedbackTool, createAISDKTools, createAISpan, createArxivClient, createBraveSearchTool, createE2BSandboxTool, createExaSearchProvider, createFileTool, createGitHubClient, createGoogleSearchTool, createGraphRagTool, createHttpSpan, createLlamaIndexTools, createMastraAISDKTools, createMastraArxivTools, createMastraE2BTools, createMastraExaSearchTools, createMastraGitHubTools, createMastraLLMChainTools, createMastraLlamaIndexTools, createMastraVectorQueryTool, createMastraWikipediaTools, createTavilySearchTool, createWikipediaClient, csvReaderTool, allToolsMap as default, defineRewardFunctionTool, deleteFileTool, docxReaderTool, e2b, editFileTool, embedDocumentTool, extractHtmlTextTool, filteredQueryTool, formatContentTool, getMainBranchRef, getOpenTelemetrySdk, getTracer, getUnreadFeedbackThreads, googleVectorQueryTool, graphRagQueryTool, toolGroups as groups, initOpenTelemetry, initOpenTelemetryTool, initSigNoz, initializeDefaultTracing, jsonReaderTool, listFilesTool, llmChainTool, optimizePolicyTool, readFileTool, readKnowledgeFileTool, recordLlmMetrics, recordLlmMetricsTool, recordMetrics, searchDocumentsTool, shutdownSigNoz, shutdownTracingTool, startAISpanTool, toolGroups, allToolsMap as toolMap, tracingTools, vectorQueryTool, wikipedia, writeKnowledgeFileTool, writeToFileTool };

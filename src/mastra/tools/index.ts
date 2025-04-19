@@ -47,7 +47,6 @@ import {
   defineRewardFunctionTool,
   optimizePolicyTool,
 } from "./rlReward";
-import { memoryQueryTool } from "./memoryQueryTool";
 
 // --- Additional Tools ---
 import { analyzeContentTool, formatContentTool } from "./contentTools";
@@ -61,7 +60,6 @@ import { createMastraWikipediaTools } from "./wikibase"; // Import Mastra helper
 import { createMastraAISDKTools } from "./ai-sdk"; // Import Mastra helper
 import { createMastraE2BTools } from "./e2b"; // Import Mastra helper
 import { createGraphRagTool, graphRagQueryTool } from "./graphRag"; // These are Mastra core tools
-import { createMastraLLMChainTools, LLMChainOutputSchema, AiSdkPromptOutputSchema } from "./llmchain"; // Import Mastra helper
 import { createMastraGitHubTools } from "./github"; // Import Mastra helper
 import { github } from "../integrations"; // Used for custom getMainBranchRef
 import ExaSearchOutputSchema from "./exasearch";
@@ -91,12 +89,10 @@ export * from "./readwrite";
 export * from "./vectorquerytool";
 export * from "./rlFeedback";
 export * from "./rlReward";
-export * from "./memoryQueryTool";
 export * from "./github";
 export * from "./graphRag";
 export * from "./calculator";
 export * from "./llamaindex";
-export * from "./mcptools"; // Keep export even if tools commented out
 export * from "./arxiv";
 export * from "./wikibase";
 export * from "./ai-sdk";
@@ -107,7 +103,6 @@ export * from "./brave-search";
 export * from "./google-search";
 export * from "./tavily";
 export * from "./tracingTools";
-export { LLMChainOutputSchema, AiSdkPromptOutputSchema };
 export { ExaSearchOutputSchema };
 export { GitHubUserSchema };
 export * from "../services/signoz";
@@ -461,15 +456,15 @@ try {
 }
 
 // --- LLM Chain Tools (using Mastra helper) ---
-try {
-    const llmChainToolsObject = createMastraLLMChainTools(); // Use the helper from llmchain.ts
-    const llmChainToolsArray = Object.values(llmChainToolsObject); // Get tool values
-    // Cast to Tool<any, any> to resolve potential type mismatches from different internal definitions
-    extraTools.push(...llmChainToolsArray.map(tool => tool as Tool<any, any>));
-    logger.info(`Added ${llmChainToolsArray.length} LLM Chain tools.`);
-} catch (error) {
-    logger.error("Failed to initialize LLM Chain tools:", { error });
-}
+//try {
+//    const llmChainToolsObject = createMastraLLMChainTools(); // Use the helper from llmchain.ts
+//    const llmChainToolsArray = Object.values(llmChainToolsObject); // Get tool values
+//    // Cast to Tool<any, any> to resolve potential type mismatches from different internal definitions
+//    extraTools.push(...llmChainToolsArray.map(tool => tool as Tool<any, any>));
+//    logger.info(`Added ${llmChainToolsArray.length} LLM Chain tools.`);
+//} catch (error) {
+//    logger.error("Failed to initialize LLM Chain tools:", { error });
+//}
 
 // --- GitHub Tools (using Mastra helper) ---
 try {
@@ -523,7 +518,7 @@ export const toolGroups = {
   search: optionalTools,
   vector: [vectorQueryTool, googleVectorQueryTool, filteredQueryTool],
   file: [readFileTool, writeToFileTool],
-  memory: [memoryQueryTool],
+  memory: [vectorQueryTool],
   rl: [
     collectFeedbackTool,
     analyzeFeedbackTool,

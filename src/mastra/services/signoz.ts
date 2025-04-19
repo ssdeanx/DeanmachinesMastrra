@@ -17,6 +17,11 @@ import {
   ConsoleSpanExporter,
   SpanProcessor
 } from '@opentelemetry/sdk-trace-base';
+import {
+  OTLPMetricExporter,
+} from '@opentelemetry/exporter-metrics-otlp-proto';
+import { PeriodicExportingMetricReader, MeterProvider } from '@opentelemetry/sdk-metrics';
+import { getNodeAutoInstrumentations as getInstrumentation } from '@opentelemetry/auto-instrumentations-node';
 
 // Import types from the types module
 import { 
@@ -37,18 +42,18 @@ let tracer: api.Tracer | null = null;
  * Initialize OpenTelemetry tracing for SigNoz
  *
  * @param config - Mastra telemetry configuration
- * @returns The configured tracer for creating spans, or null if disabled
+ * @returns The configured tracer and meter for creating spans and metrics, or null if disabled
  */
-export function initSigNoz(config: OtelConfig): api.Tracer | null {
+export function initSigNoz(config: OtelConfig): { tracer: api.Tracer | null; meter: MeterProvider | null } {
   // Skip if explicitly disabled
   if (config.enabled === false) {
     logger.info('SigNoz tracing is disabled');
-    return null;
+    return { tracer: null, meter: null };
   }
   
   // Use existing tracer if already initialized
   if (tracer) {
-    return tracer;
+    return { tracer, meter: null };
   }
 
   try {
@@ -98,14 +103,36 @@ export function initSigNoz(config: OtelConfig): api.Tracer | null {
     tracer = api.trace.getTracer('deanmachines-tracer');
     
     logger.info('SigNoz tracing initialized successfully');
-    return tracer;
+
+    // ─── METRICS SETUP ───────────────────────────────────────────────
+    const metricExporter = new OTLPMetricExporter({
+      url: env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT || endpoint.replace('/v1/traces', '/v1/metrics'),
+      headers,
+    });
+
+    // Create a periodic reader for metrics export
+    const metricReader = new PeriodicExportingMetricReader({
+      exporter: metricExporter,
+      exportIntervalMillis: config.export?.metricsInterval ?? 60000,
+    });
+
+    const meterProvider = new MeterProvider({
+      resource,
+      views: [], // add any custom views here
+      readers: [metricReader],
+    });
+    if (env.NODE_ENV !== 'production') {
+      logger.debug('SigNoz metrics exporter configured');
+    }
+
+    return { tracer, meter: meterProvider };
     
   } catch (error) {
     logger.error('Failed to initialize SigNoz tracing', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
-    return null;
+    return { tracer: null, meter: null };
   }
 }
 
@@ -278,5 +305,8 @@ export default {
   createHttpSpan,
   recordLlmMetrics,
   recordMetrics,
-  shutdown: shutdownSigNoz
+  shutdown: async () => {
+    if (tracerProvider) await tracerProvider.shutdown();
+    // also shutdown metric reader if needed
+  }
 };
