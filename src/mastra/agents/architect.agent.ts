@@ -9,7 +9,7 @@ import { createAgentFromConfig } from "./base.agent";
 import {architectConfig} from "./config";
 import { createLogger } from "@mastra/core/logger";
 
-const logger = createLogger({ name: "architect-agent", level: "info" });
+const logger = createLogger({ name: "architect-agent", level: "debug" });
 
 /**
  * Architecture Agent

@@ -12,7 +12,7 @@ import { createLogger } from "@mastra/core/logger";
 import { sharedMemory } from "../database";
 
 // Configure logger for the copywriter agent
-const logger = createLogger({ name: "copywriter-agent", level: "info" });
+const logger = createLogger({ name: "copywriter-agent", level: "debug" });
 
 /**
  * Initialize the copywriter agent instance using its configuration

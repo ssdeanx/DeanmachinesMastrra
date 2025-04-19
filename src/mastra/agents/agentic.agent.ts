@@ -11,7 +11,7 @@ import { createAgentFromConfig } from "./base.agent";
 import { agenticAssistantConfig, agenticResponseSchema } from "./config";
 
 // Initialize logger for this module
-const logger = createLogger({ name: "agentic-agent", level: "info" });
+const logger = createLogger({ name: "agentic-agent", level: "debug" });
 
 /**
  * Agentic-style Agent with data analysis capabilities

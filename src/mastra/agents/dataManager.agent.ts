@@ -10,7 +10,7 @@ import { dataManagerAgentConfig } from "./config";
 import { sharedMemory } from "../database";
 import { createLogger } from "@mastra/core/logger";
 
-const logger = createLogger({ name: "data-manager-agent", level: "info" });
+const logger = createLogger({ name: "data-manager-agent", level: "debug" });
 
 /**
  * Data Manager Agent with file and storage management capabilities

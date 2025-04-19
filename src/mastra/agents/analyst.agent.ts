@@ -10,7 +10,7 @@ import { analystAgentConfig } from "./config";
 import { sharedMemory } from "../database";
 import { createLogger } from "@mastra/core/logger";
 
-const logger = createLogger({ name: "analyst-agent", level: "info" });
+const logger = createLogger({ name: "analyst-agent", level: "debug" });
 
 /**
  * Analyst Agent with data analysis capabilities

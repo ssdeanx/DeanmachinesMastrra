@@ -10,7 +10,7 @@ import { rlTrainerAgentConfig } from "./config";
 import { sharedMemory } from "../database";
 import { createLogger } from "@mastra/core/logger";
 
-const logger = createLogger({ name: "rl-trainer-agent", level: "info" });
+const logger = createLogger({ name: "rl-trainer-agent", level: "debug" });
 
 /**
  * RL Trainer Agent with reinforcement learning capabilities

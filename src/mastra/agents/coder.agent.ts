@@ -12,7 +12,7 @@ import { createLogger } from "@mastra/core/logger";
 import { sharedMemory } from "../database";
 
 // Configure logger for the coder agent
-const logger = createLogger({ name: "coder-agent", level: "info" });
+const logger = createLogger({ name: "coder-agent", level: "debug" });
 
 /**
  * Initialize the coder agent instance using its configuration

@@ -345,6 +345,6 @@ export { ragWorkflow };
 
 // Export agent networks
 export * from "./Networks/agentNetwork";
-
+export * from "./workflowFactory";
 // TODO: Add and export additional workflow definitions here as they are developed
 // export * from "./researchWorkflow";

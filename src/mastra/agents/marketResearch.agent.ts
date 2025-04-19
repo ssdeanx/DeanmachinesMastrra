@@ -9,7 +9,7 @@ import { createAgentFromConfig } from "./base.agent";
 import {marketResearchAgentConfig} from "./config";
 import { createLogger } from "@mastra/core/logger";
 
-const logger = createLogger({ name: "market-research-agent", level: "info" });
+const logger = createLogger({ name: "market-research-agent", level: "debug" });
 
 /**
  * Market Research Agent

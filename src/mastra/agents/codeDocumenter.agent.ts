@@ -9,7 +9,7 @@ import { createAgentFromConfig } from "./base.agent";
 import { codeDocumenterConfig } from "./config/"; // Import directly
 import { createLogger } from "@mastra/core/logger";
 
-const logger = createLogger({ name: "code-documenter-agent", level: "info" });
+const logger = createLogger({ name: "code-documenter-agent", level: "debug" });
 
 /**
  * Code Documenter Agent

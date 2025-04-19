@@ -10,7 +10,7 @@ import { researchAgentConfig } from "./config";
 import { sharedMemory } from "../database";
 import { createLogger } from "@mastra/core/logger";
 
-const logger = createLogger({ name: "research-agent", level: "info" });
+const logger = createLogger({ name: "research-agent", level: "debug" });
 
 /**
  * Research Agent with web search capabilities

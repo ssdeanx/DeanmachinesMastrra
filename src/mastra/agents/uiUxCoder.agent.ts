@@ -9,7 +9,7 @@ import { createAgentFromConfig } from "./base.agent";
 import { uiUxCoderConfig } from "./config";
 import { createLogger } from "@mastra/core/logger";
 
-const logger = createLogger({ name: "ui-ux-coder-agent", level: "info" });
+const logger = createLogger({ name: "ui-ux-coder-agent", level: "debug" });
 
 /**
  * UI/UX Coder Agent

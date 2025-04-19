@@ -23,7 +23,7 @@ import { createResponseHook } from "../hooks";
 import { allToolsMap } from "../tools";
 
 // Configure logger for agent initialization
-const logger = createLogger({ name: "agent-initialization", level: "info" });
+const logger = createLogger({ name: "agent-initialization", level: "debug" });
 
 /**
  * Creates an agent instance from a configuration object and options

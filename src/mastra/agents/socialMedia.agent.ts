@@ -9,7 +9,7 @@ import { createAgentFromConfig } from "./base.agent";
 import { socialMediaAgentConfig } from "./config";
 import { createLogger } from "@mastra/core/logger";
 
-const logger = createLogger({ name: "social-media-agent", level: "info" });
+const logger = createLogger({ name: "social-media-agent", level: "debug" });
 
 /**
  * Social Media Agent

@@ -91,3 +91,6 @@ export async function runMainWorkflow(inputData: string) {
   const run = mainWorkflow.createRun();
   return await run.start({ triggerData: { inputData } });
 }
+
+export default createDynamicWorkflowFactory;
+export * from "./workflowFactory";

@@ -9,7 +9,7 @@ import { createAgentFromConfig } from "./base.agent";
 import { seoAgentConfig } from "./config";
 import { createLogger } from "@mastra/core/logger";
 
-const logger = createLogger({ name: "seo-agent", level: "info" });
+const logger = createLogger({ name: "seo-agent", level: "debug" });
 
 /**
  * SEO Agent
