@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.0.15] - 2025-04-20
+
+### Added
+
+- **Puppeteer Tool (`puppeteerTool.ts`)** Needs fixed causes stream to crash.
+Trace
+Trace Id
+Started	Total Duration
+
+stream
+b1052f4e30ebab490748d50db729b901	4/20/2025, 9:51:12 AM	15.861ms
+
+stream
+8642fc5243ae5610e419a4431b792779	4/20/2025, 9:49:01 AM	1924.593ms
+
+__registerMastra
+9337ac666c23e33bd1f6b85d98daf44a	4/20/2025, 9:48:45 AM	0.007ms
+
+__registerMastra
+e85fb9fff96413107517aac82da2e943	4/20/2025, 9:48:45 AM	0.005ms
+
+__registerMastra
+e39c38bd34ca5e5cbc47a2d6a32cd057	4/20/2025, 9:48:45 AM	0.005ms
+
+__registerMastra
+1fc4f91de6d279050eca05ef2f5d598e	4/20/2025, 9:48:45 AM	0.051ms
+
+__registerPrimitives
+93250cfc44aaf1d882d180aa4fe39b13	4/20/2025, 9:48:45 AM	0.096ms
+
+__registerMastra
+2744379f4f8e815785ebaddaa4830add	4/20/2025, 9:48:45 AM	0.391ms
+
+__registerPrimitives
+629c2ccf8f2b4bc80f8867c4ef9ef0de	4/20/2025, 9:48:45 AM	0.168ms
+
+  - Implemented a new Mastra tool (`puppeteer_web_automator`) for advanced browser automation using Puppeteer.
+  - Supports navigating to URLs, executing a sequence of actions (click, type, scrape, wait, scroll, hover, select, evaluate), taking screenshots, and extracting data.
+  - Includes robust action schemas defined with Zod for type safety and validation.
+  - Provides detailed logging for each step of the automation process.
+- **Knowledge Base Integration (`puppeteerTool.ts`)**
+  - Integrated `writeKnowledgeFileTool` (from `readwrite.ts`) into `puppeteerTool`.
+  - Added input options (`saveKnowledgeFilename`, `saveFormat`, `saveMode`, `saveEncoding`) to allow users to optionally save scraped data directly to the knowledge base.
+  - Handles formatting scraped data into JSON or basic CSV before saving.
+  - Includes error handling and status reporting for the save operation in the tool's output.
+- **Observability (`puppeteerTool.ts`)**
+  - Integrated SigNoz tracing (`createAISpan`, `recordMetrics`) into `puppeteerTool`.
+  - Creates a span for each tool execution, recording input parameters, key events (navigation, actions, saving), latency, final status (success/error), and exceptions.
+  - Provides detailed observability into the tool's performance and behavior.
+- **Tool Registration (`index.ts`)**
+  - Imported and registered `puppeteerTool` in the main tool barrel file (`src/mastra/tools/index.ts`).
+  - Added `puppeteerTool` to `allTools`, `allToolsMap`, and `toolGroups` for unified tool discovery and registration.
+
+---
+
 ## [v0.0.14] - 2025-04-19
 
 ### Added

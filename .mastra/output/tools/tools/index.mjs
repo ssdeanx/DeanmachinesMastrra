@@ -29,7 +29,7 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { BatchSpanProcessor, SimpleSpanProcessor, ConsoleSpanExporter } from '@opentelemetry/sdk-trace-base';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-proto';
 import { PeriodicExportingMetricReader, MeterProvider } from '@opentelemetry/sdk-metrics';
-import { randomUUID } from 'crypto';
+import crypto, { randomUUID } from 'crypto';
 import { vertex } from '@ai-sdk/google-vertex';
 import { openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
@@ -59,6 +59,7 @@ import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { PolygonClient } from '@agentic/polygon';
 import { RedditClient } from '@agentic/reddit';
+import puppeteer from 'puppeteer';
 import { create, all } from 'mathjs';
 
 class MastraEmbeddingAdapter extends GoogleGenerativeAIEmbeddings {
@@ -121,7 +122,7 @@ function createEmbeddings(apiKey, modelName) {
   });
 }
 
-const logger$9 = createLogger({ name: "vector-query-tool", level: "info" });
+const logger$a = createLogger({ name: "vector-query-tool", level: "info" });
 const envSchema$2 = z.object({
   GOOGLE_AI_API_KEY: z.string().min(1, "Google AI API key is required"),
   PINECONE_INDEX: z.string().default("Default"),
@@ -132,7 +133,7 @@ const validatedEnv$1 = (() => {
   try {
     return envSchema$2.parse(env);
   } catch (error) {
-    logger$9.error("Environment validation failed:", { error });
+    logger$a.error("Environment validation failed:", { error });
     throw new Error(
       `Vector query tool configuration error: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -147,12 +148,12 @@ function createMastraVectorQueryTool(config = {}) {
     const dimensions = config.dimensions || validatedEnv$1.PINECONE_DIMENSION;
     const apiKey = config.apiKey || validatedEnv$1.GOOGLE_AI_API_KEY;
     const topK = config.topK || 5;
-    logger$9.info(
+    logger$a.info(
       `Creating vector query tool for ${vectorStoreName}:${indexName}`
     );
     let embeddingModel;
     if (embeddingProvider === "tiktoken") {
-      logger$9.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
+      logger$a.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
       const tiktokenAdapter = {
         specificationVersion: "v1",
         provider: "tiktoken",
@@ -176,7 +177,7 @@ function createMastraVectorQueryTool(config = {}) {
             }
             return { embeddings: [{ embedding }] };
           } catch (error) {
-            logger$9.error("Tiktoken embedding error:", { error });
+            logger$a.error("Tiktoken embedding error:", { error });
             throw new Error(
               `Tiktoken embedding failed: ${error instanceof Error ? error.message : String(error)}`
             );
@@ -206,7 +207,7 @@ function createMastraVectorQueryTool(config = {}) {
       };
       embeddingModel = tiktokenAdapter;
     } else {
-      logger$9.info("Using Google embeddings");
+      logger$a.info("Using Google embeddings");
       embeddingModel = createEmbeddings(
         apiKey,
         "models/gemini-embedding-exp-03-07"
@@ -234,10 +235,10 @@ function createMastraVectorQueryTool(config = {}) {
       description,
       enableFilter: config.enableFilters
     });
-    logger$9.info(`Vector query tool created: ${toolId}`);
+    logger$a.info(`Vector query tool created: ${toolId}`);
     return tool;
   } catch (error) {
-    logger$9.error("Failed to create vector query tool:", { error });
+    logger$a.error("Failed to create vector query tool:", { error });
     throw new Error(
       `Vector query tool creation failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -1094,7 +1095,7 @@ const writeKnowledgeFileTool = createTool({
     success: z.boolean().describe("Whether the operation was successful"),
     error: z.string().optional().describe("Error message if the operation failed")
   }),
-  execute: async ({ context }) => {
+  execute: async ({ context, container }) => {
     const runId = await createLangSmithRun("write-knowledge-file", [
       "knowledge",
       "write"
@@ -1108,11 +1109,13 @@ const writeKnowledgeFileTool = createTool({
         throw new Error("writeToFileTool.execute is not defined");
       }
       return writeToFileTool.execute({
+        container,
+        // Pass the container
         context: {
           ...context,
           path: knowledgePath,
           // Provide the default value from writeToFileTool's schema
-          maxSizeBytes: 10485760
+          maxSizeBytes: 100485760
         }
       });
     } catch (error) {
@@ -1353,12 +1356,12 @@ const OTelAttributeNames = {
   TOTAL_TOKENS: "ai.tokens.total",
   LATENCY_MS: "ai.latency.ms"};
 
-const logger$8 = createLogger({ name: "signoz-service", level: "info" });
+const logger$9 = createLogger({ name: "signoz-service", level: "info" });
 let tracerProvider = null;
 let tracer = null;
 function initSigNoz(config) {
   if (config.enabled === false) {
-    logger$8.info("SigNoz tracing is disabled");
+    logger$9.info("SigNoz tracing is disabled");
     return { tracer: null, meter: null };
   }
   if (tracer) {
@@ -1368,7 +1371,7 @@ function initSigNoz(config) {
     const serviceName = config.serviceName || "deanmachines-ai";
     const endpoint = config.export?.endpoint || env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces";
     const headers = config.export?.headers || {};
-    logger$8.info(`Initializing SigNoz tracing for service: ${serviceName}`, { endpoint });
+    logger$9.info(`Initializing SigNoz tracing for service: ${serviceName}`, { endpoint });
     const resource = resourceFromAttributes({
       [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
       [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: env.NODE_ENV || "development"
@@ -1381,7 +1384,7 @@ function initSigNoz(config) {
     processors.push(new BatchSpanProcessor(otlpExporter));
     if (env.NODE_ENV !== "production") {
       processors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
-      logger$8.debug("Added console span exporter for debugging");
+      logger$9.debug("Added console span exporter for debugging");
     }
     tracerProvider = new NodeTracerProvider({
       resource,
@@ -1389,7 +1392,7 @@ function initSigNoz(config) {
     });
     tracerProvider.register();
     tracer = api.trace.getTracer("deanmachines-tracer");
-    logger$8.info("SigNoz tracing initialized successfully");
+    logger$9.info("SigNoz tracing initialized successfully");
     const metricExporter = new OTLPMetricExporter({
       url: env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT || endpoint.replace("/v1/traces", "/v1/metrics"),
       headers
@@ -1405,11 +1408,11 @@ function initSigNoz(config) {
       readers: [metricReader]
     });
     if (env.NODE_ENV !== "production") {
-      logger$8.debug("SigNoz metrics exporter configured");
+      logger$9.debug("SigNoz metrics exporter configured");
     }
     return { tracer, meter: meterProvider };
   } catch (error) {
-    logger$8.error("Failed to initialize SigNoz tracing", {
+    logger$9.error("Failed to initialize SigNoz tracing", {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : void 0
     });
@@ -1424,7 +1427,7 @@ function getTracer() {
 }
 function createAISpan(name, attributes = {}) {
   if (!tracer) {
-    logger$8.warn("Creating span without initialized SigNoz tracing");
+    logger$9.warn("Creating span without initialized SigNoz tracing");
     return api.trace.getTracer("no-op").startSpan(name);
   }
   return tracer.startSpan(name, {
@@ -1471,11 +1474,11 @@ function recordMetrics(span, metrics) {
 async function shutdownSigNoz() {
   if (tracerProvider) {
     try {
-      logger$8.info("Shutting down SigNoz tracing");
+      logger$9.info("Shutting down SigNoz tracing");
       await tracerProvider.shutdown();
-      logger$8.info("SigNoz tracing shutdown complete");
+      logger$9.info("SigNoz tracing shutdown complete");
     } catch (error) {
-      logger$8.error("Error shutting down SigNoz tracing", { error });
+      logger$9.error("Error shutting down SigNoz tracing", { error });
     }
   }
 }
@@ -1517,7 +1520,7 @@ var signoz = {
   }
 };
 
-const logger$7 = createLogger({ name: "thread-manager", level: "info" });
+const logger$8 = createLogger({ name: "thread-manager", level: "info" });
 class ThreadManager {
   threads = /* @__PURE__ */ new Map();
   resourceThreads = /* @__PURE__ */ new Map();
@@ -1531,7 +1534,7 @@ class ThreadManager {
    */
   async createThread(options) {
     const span = createAISpan("thread.create", { resourceId: options.resourceId });
-    logger$7.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
+    logger$8.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
     const startTime = Date.now();
     let runId;
     try {
@@ -1547,7 +1550,7 @@ class ThreadManager {
         this.resourceThreads.set(options.resourceId, /* @__PURE__ */ new Set());
       }
       this.resourceThreads.get(options.resourceId)?.add(threadId);
-      logger$7.info("Thread created", { threadId, resourceId: options.resourceId });
+      logger$8.info("Thread created", { threadId, resourceId: options.resourceId });
       span.setStatus({ code: 1 });
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "success" });
       runId = await createLangSmithRun("thread.create", [options.resourceId]);
@@ -1556,7 +1559,7 @@ class ThreadManager {
     } catch (error) {
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "error", errorMessage: String(error) });
       if (runId) await trackFeedback(runId, { score: 0, comment: "Thread creation failed", value: error });
-      logger$7.error("Failed to create thread", { error });
+      logger$8.error("Failed to create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -1573,11 +1576,11 @@ class ThreadManager {
     const span = createAISpan("thread.get", { threadId });
     try {
       const thread = this.threads.get(threadId);
-      logger$7.info("Get thread", { threadId, found: !!thread });
+      logger$8.info("Get thread", { threadId, found: !!thread });
       span.setStatus({ code: 1 });
       return thread;
     } catch (error) {
-      logger$7.error("Failed to get thread", { error });
+      logger$8.error("Failed to get thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -1595,11 +1598,11 @@ class ThreadManager {
     try {
       const threadIds = this.resourceThreads.get(resourceId) || /* @__PURE__ */ new Set();
       const threads = Array.from(threadIds).map((id) => this.threads.get(id)).filter((thread) => thread !== void 0);
-      logger$7.info("Get threads by resource", { resourceId, count: threads.length });
+      logger$8.info("Get threads by resource", { resourceId, count: threads.length });
       span.setStatus({ code: 1 });
       return threads;
     } catch (error) {
-      logger$7.error("Failed to get threads by resource", { error });
+      logger$8.error("Failed to get threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -1617,16 +1620,16 @@ class ThreadManager {
     try {
       const threads = this.getThreadsByResource(resourceId);
       if (threads.length === 0) {
-        logger$7.info("No threads found for resource", { resourceId });
+        logger$8.info("No threads found for resource", { resourceId });
         span.setStatus({ code: 1 });
         return void 0;
       }
       const mostRecent = threads.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-      logger$7.info("Most recent thread", { resourceId, threadId: mostRecent.id });
+      logger$8.info("Most recent thread", { resourceId, threadId: mostRecent.id });
       span.setStatus({ code: 1 });
       return mostRecent;
     } catch (error) {
-      logger$7.error("Failed to get most recent thread", { error });
+      logger$8.error("Failed to get most recent thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -1645,16 +1648,16 @@ class ThreadManager {
     try {
       const existingThread = this.getMostRecentThread(resourceId);
       if (existingThread) {
-        logger$7.info("Found existing thread", { resourceId, threadId: existingThread.id });
+        logger$8.info("Found existing thread", { resourceId, threadId: existingThread.id });
         span.setStatus({ code: 1 });
         return existingThread;
       }
-      logger$7.info("No existing thread, creating new", { resourceId });
+      logger$8.info("No existing thread, creating new", { resourceId });
       const newThread = await this.createThread({ resourceId, metadata });
       span.setStatus({ code: 1 });
       return newThread;
     } catch (error) {
-      logger$7.error("Failed to get or create thread", { error });
+      logger$8.error("Failed to get or create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -1673,11 +1676,11 @@ class ThreadManager {
       const thread = this.threads.get(threadId);
       if (thread) {
         thread.lastReadAt = date;
-        logger$7.info("Marked thread as read", { threadId, date });
+        logger$8.info("Marked thread as read", { threadId, date });
       }
       span.setStatus({ code: 1 });
     } catch (error) {
-      logger$7.error("Failed to mark thread as read", { error });
+      logger$8.error("Failed to mark thread as read", { error });
       span.setStatus({ code: 2, message: String(error) });
     } finally {
       span.end();
@@ -1696,11 +1699,11 @@ class ThreadManager {
         const lastRead = this.threadReadStatus.get(thread.id);
         return !lastRead || thread.createdAt > lastRead;
       });
-      logger$7.info("Get unread threads by resource", { resourceId, count: unread.length });
+      logger$8.info("Get unread threads by resource", { resourceId, count: unread.length });
       span.setStatus({ code: 1 });
       return unread;
     } catch (error) {
-      logger$7.error("Failed to get unread threads by resource", { error });
+      logger$8.error("Failed to get unread threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -2332,8 +2335,8 @@ function getUnreadFeedbackThreads(agentId) {
   return threadManager.getUnreadThreadsByResource(agentId);
 }
 
-const logger$6 = createLogger({ name: "Memory", level: "debug" });
-logger$6.info("Initializing Memory with LibSQL storage");
+const logger$7 = createLogger({ name: "Memory", level: "debug" });
+logger$7.info("Initializing Memory with LibSQL storage");
 const defaultMemoryConfig = {
   lastMessages: 200,
   semanticRecall: {
@@ -2774,7 +2777,7 @@ const formatContentTool = createTool({
   }
 });
 
-const logger$5 = createLogger({ name: "document-tools", level: process.env.LOG_LEVEL === "debug" ? "debug" : "info" });
+const logger$6 = createLogger({ name: "document-tools", level: process.env.LOG_LEVEL === "debug" ? "debug" : "info" });
 const documentRepository = [
   {
     id: "1",
@@ -2915,19 +2918,19 @@ const extractHtmlTextTool = createTool({
     try {
       let html = context.html;
       if (!html && context.url) {
-        logger$5.info(`Fetching HTML from URL: ${context.url}`);
+        logger$6.info(`Fetching HTML from URL: ${context.url}`);
         const response = await fetch(context.url);
         if (!response.ok) throw new Error(`Failed to fetch URL: ${response.statusText}`);
         html = await response.text();
       }
       if (!html) throw new Error("No HTML content provided or fetched.");
-      logger$5.info("Extracting text from HTML using cheerio");
+      logger$6.info("Extracting text from HTML using cheerio");
       const $ = cheerio.load(html);
       const text = $("body").text();
       recordMetrics(span, { status: "success" });
       return { text };
     } catch (error) {
-      logger$5.error(`extractHtmlTextTool error: ${error instanceof Error ? error.message : String(error)}`);
+      logger$6.error(`extractHtmlTextTool error: ${error instanceof Error ? error.message : String(error)}`);
       recordMetrics(span, { status: "error", errorMessage: error instanceof Error ? error.message : String(error) });
       throw error;
     } finally {
@@ -3593,7 +3596,7 @@ function createLLMChain(promptTemplate, config) {
   return prompt.pipe(llm);
 }
 
-const logger$4 = createLogger({ name: "langfuse-service", level: "info" });
+const logger$5 = createLogger({ name: "langfuse-service", level: "info" });
 const envSchema$1 = z.object({
   LANGFUSE_PUBLIC_KEY: z.string().min(1, "Langfuse public key is required"),
   LANGFUSE_SECRET_KEY: z.string().min(1, "Langfuse secret key is required"),
@@ -3606,12 +3609,12 @@ function validateEnv() {
     if (error instanceof z.ZodError) {
       const missingKeys = error.errors.filter((e) => e.code === "invalid_type" && e.received === "undefined").map((e) => e.path.join("."));
       if (missingKeys.length > 0) {
-        logger$4.error(
+        logger$5.error(
           `Missing required environment variables: ${missingKeys.join(", ")}`
         );
       }
     }
-    logger$4.error("Langfuse environment validation failed:", { error });
+    logger$5.error("Langfuse environment validation failed:", { error });
     throw new Error(
       `Langfuse service configuration error: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -3626,7 +3629,7 @@ function createLangfuseClient() {
       baseUrl: validatedEnv.LANGFUSE_HOST
     });
   } catch (error) {
-    logger$4.error("Failed to create Langfuse client:", { error });
+    logger$5.error("Failed to create Langfuse client:", { error });
     throw new Error(
       `Langfuse client creation failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -3647,10 +3650,10 @@ class LangfuseService {
    */
   createTrace(name, options) {
     try {
-      logger$4.debug("Creating Langfuse trace", { name, ...options });
+      logger$5.debug("Creating Langfuse trace", { name, ...options });
       return this.client.trace({ name, ...options });
     } catch (error) {
-      logger$4.error("Error creating trace:", { error, name });
+      logger$5.error("Error creating trace:", { error, name });
       throw new Error(`Failed to create Langfuse trace: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -3663,10 +3666,10 @@ class LangfuseService {
    */
   createSpan(name, options) {
     try {
-      logger$4.debug("Creating Langfuse span", { name, ...options });
+      logger$5.debug("Creating Langfuse span", { name, ...options });
       return this.client.span({ name, ...options });
     } catch (error) {
-      logger$4.error("Error creating span:", { error, name });
+      logger$5.error("Error creating span:", { error, name });
       throw new Error(`Failed to create Langfuse span: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -3679,10 +3682,10 @@ class LangfuseService {
    */
   logGeneration(name, options) {
     try {
-      logger$4.debug("Logging Langfuse generation", { name, ...options });
+      logger$5.debug("Logging Langfuse generation", { name, ...options });
       return this.client.generation({ name, ...options });
     } catch (error) {
-      logger$4.error("Error logging generation:", { error, name });
+      logger$5.error("Error logging generation:", { error, name });
       throw new Error(`Failed to log Langfuse generation: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -3695,13 +3698,13 @@ class LangfuseService {
    */
   createScore(options) {
     try {
-      logger$4.debug("Creating Langfuse score", options);
+      logger$5.debug("Creating Langfuse score", options);
       if (!options.traceId && !options.spanId && !options.generationId) {
         throw new Error("At least one of traceId, spanId, or generationId must be provided");
       }
       return this.client.score(options);
     } catch (error) {
-      logger$4.error("Error creating score:", { error, name: options.name });
+      logger$5.error("Error creating score:", { error, name: options.name });
       throw new Error(`Failed to create Langfuse score: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -3713,9 +3716,9 @@ class LangfuseService {
   async flush() {
     try {
       await this.client.flush();
-      logger$4.debug("Flushed Langfuse events");
+      logger$5.debug("Flushed Langfuse events");
     } catch (error) {
-      logger$4.error("Error flushing Langfuse events:", { error });
+      logger$5.error("Error flushing Langfuse events:", { error });
       throw new Error(`Failed to flush Langfuse events: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -4378,7 +4381,7 @@ const github = new GithubIntegration({
   }
 });
 
-const logger$3 = createLogger({ name: "evals", level: "info" });
+const logger$4 = createLogger({ name: "evals", level: "info" });
 function getEvalModelId() {
   return process.env.EVAL_MODEL_ID || "models/gemini-2.0-flashlite";
 }
@@ -4844,12 +4847,12 @@ const faithfulnessEvalTool = createTool({
       const explanation = `Matched ${matched} of ${facts.length} reference facts.`;
       signoz.recordMetrics(span, { latencyMs: performance.now() - startTime, status: "success" });
       span.end();
-      logger$3.info("Faithfulness eval result", { score, explanation, response: context.response });
+      logger$4.info("Faithfulness eval result", { score, explanation, response: context.response });
       return { score, explanation, success: true };
     } catch (error) {
       signoz.recordMetrics(span, { latencyMs: performance.now() - startTime, status: "error", errorMessage: error instanceof Error ? error.message : String(error) });
       span.end();
-      logger$3.error("Faithfulness eval error", { error });
+      logger$4.error("Faithfulness eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -4887,12 +4890,12 @@ const biasEvalTool = createTool({
       const found = biasKeywords.filter((k) => lower.includes(k));
       const score = found.length > 0 ? Math.min(1, found.length * 0.3) : 0;
       const explanation = found.length > 0 ? `Detected possible bias: ${found.join(", ")}` : "No obvious bias detected.";
-      logger$3.info("Bias eval result", { score, explanation, response: context.response });
+      logger$4.info("Bias eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$3.error("Bias eval error", { error });
+      logger$4.error("Bias eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -4931,12 +4934,12 @@ const toxicityEvalTool = createTool({
       const found = toxicKeywords.filter((k) => lower.includes(k));
       const score = found.length > 0 ? Math.min(1, found.length * 0.2) : 0;
       const explanation = found.length > 0 ? `Detected possible toxicity: ${found.join(", ")}` : "No obvious toxicity detected.";
-      logger$3.info("Toxicity eval result", { score, explanation, response: context.response });
+      logger$4.info("Toxicity eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$3.error("Toxicity eval error", { error });
+      logger$4.error("Toxicity eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -4968,12 +4971,12 @@ const hallucinationEvalTool = createTool({
       }
       const score = sentences.length > 0 ? hallucinated / sentences.length : 0;
       const explanation = hallucinated > 0 ? `${hallucinated} of ${sentences.length} sentences may be hallucinated.` : "No obvious hallucinations detected.";
-      logger$3.info("Hallucination eval result", { score, explanation, response: context.response });
+      logger$4.info("Hallucination eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$3.error("Hallucination eval error", { error });
+      logger$4.error("Hallucination eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -5001,18 +5004,18 @@ const summarizationEvalTool = createTool({
       const brevity = 1 - Math.min(1, context.summary.length / (context.reference.length || 1));
       const score = Math.max(0, Math.min(1, coverage * 0.7 + brevity * 0.3));
       const explanation = `Coverage: ${(coverage * 100).toFixed(0)}%, Brevity: ${(brevity * 100).toFixed(0)}%`;
-      logger$3.info("Summarization eval result", { score, explanation, summary: context.summary });
+      logger$4.info("Summarization eval result", { score, explanation, summary: context.summary });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$3.error("Summarization eval error", { error });
+      logger$4.error("Summarization eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 });
 
-const logger$2 = createLogger({ name: "opentelemetry-tracing", level: "info" });
+const logger$3 = createLogger({ name: "opentelemetry-tracing", level: "info" });
 function logWithTraceContext(target, level, message, data) {
   const fn = target[level];
   if (typeof fn === "function") {
@@ -5033,7 +5036,7 @@ function initOpenTelemetry({
   metricsIntervalMs = 6e4
 }) {
   if (!enabled) {
-    logger$2.info("OpenTelemetry tracing is disabled");
+    logger$3.info("OpenTelemetry tracing is disabled");
     return null;
   }
   const exporterUrl = endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4317/v1/traces";
@@ -5057,23 +5060,23 @@ function initOpenTelemetry({
       exportIntervalMillis: metricsIntervalMs
     });
     sdkConfig.metricReader = metricReader;
-    logger$2.info("OpenTelemetry metrics enabled");
+    logger$3.info("OpenTelemetry metrics enabled");
   }
   const sdk = new NodeSDK(sdkConfig);
   try {
     sdk.start();
-    logger$2.info("OpenTelemetry SDK initialized successfully");
+    logger$3.info("OpenTelemetry SDK initialized successfully");
   } catch (initError) {
-    logger$2.error("Error initializing OpenTelemetry SDK", {
+    logger$3.error("Error initializing OpenTelemetry SDK", {
       error: initError instanceof Error ? initError.message : String(initError)
     });
   }
   process$1.on("SIGTERM", async () => {
     try {
       await sdk.shutdown();
-      logger$2.info("OpenTelemetry SDK shut down successfully");
+      logger$3.info("OpenTelemetry SDK shut down successfully");
     } catch (shutdownError) {
-      logger$2.error("Error shutting down OpenTelemetry SDK", {
+      logger$3.error("Error shutting down OpenTelemetry SDK", {
         error: shutdownError instanceof Error ? shutdownError.message : String(shutdownError)
       });
     } finally {
@@ -5714,6 +5717,359 @@ function createMastraRedditTools() {
   }
   return mastraTools;
 }
+
+const logger$2 = createLogger({ name: "puppeteer", level: "debug" });
+logger$2.info("Initializing Puppeteer tool for web navigation and screenshotting.");
+const SCREENSHOT_DIR = path.resolve(process.cwd(), "puppeteer_screenshots");
+function generateScreenshotFilename(url) {
+  const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+  const urlHash = crypto.createHash("md5").update(url).digest("hex").substring(0, 8);
+  return `screenshot_${urlHash}_${timestamp}.png`;
+}
+const ClickActionSchema = z.object({
+  type: z.literal("click"),
+  selector: z.string().describe("CSS selector for the element to click."),
+  waitForNavigation: z.boolean().optional().default(false).describe("Wait for navigation to complete after the click.")
+});
+const TypeActionSchema = z.object({
+  type: z.literal("type"),
+  selector: z.string().describe("CSS selector for the input field."),
+  text: z.string().describe("Text to type into the field."),
+  delay: z.number().optional().default(50).describe("Delay between keystrokes in milliseconds.")
+});
+const ScrapeActionSchema = z.object({
+  type: z.literal("scrape"),
+  selector: z.string().describe("CSS selector for the element(s) to scrape."),
+  attribute: z.string().optional().describe("Optional attribute to extract (e.g., 'href', 'src'). If omitted, extracts text content."),
+  multiple: z.boolean().optional().default(false).describe("Whether to scrape multiple matching elements.")
+});
+const WaitForSelectorActionSchema = z.object({
+  type: z.literal("waitForSelector"),
+  selector: z.string().describe("CSS selector to wait for."),
+  timeout: z.number().optional().default(3e4).describe("Maximum time to wait in milliseconds.")
+});
+const ScrollActionSchema = z.object({
+  type: z.literal("scroll"),
+  direction: z.enum(["down", "up", "bottom", "top"]).describe("Direction to scroll."),
+  amount: z.number().optional().describe("Pixel amount to scroll (for 'down'/'up'). Defaults to window height/width."),
+  selector: z.string().optional().describe("Optional selector to scroll within or to.")
+  // Scroll within an element or scroll element into view
+});
+const HoverActionSchema = z.object({
+  type: z.literal("hover"),
+  selector: z.string().describe("CSS selector for the element to hover over.")
+});
+const SelectActionSchema = z.object({
+  type: z.literal("select"),
+  selector: z.string().describe("CSS selector for the <select> element."),
+  value: z.string().describe("The value of the <option> to select.")
+});
+const WaitActionSchema = z.object({
+  type: z.literal("wait"),
+  duration: z.number().int().min(1).describe("Duration to wait in milliseconds.")
+});
+const EvaluateActionSchema = z.object({
+  type: z.literal("evaluate"),
+  script: z.string().describe("JavaScript code to execute in the page context. Use 'return' to output data.")
+});
+const ActionSchema = z.discriminatedUnion("type", [
+  ClickActionSchema,
+  TypeActionSchema,
+  ScrapeActionSchema,
+  WaitForSelectorActionSchema,
+  ScrollActionSchema,
+  HoverActionSchema,
+  SelectActionSchema,
+  WaitActionSchema,
+  EvaluateActionSchema
+]);
+const PuppeteerOutputSchema = z.object({
+  url: z.string().url().describe("The final URL after navigation and actions."),
+  pageTitle: z.string().optional().describe("The title of the web page after actions."),
+  scrapedData: z.array(z.any()).optional().describe("Data scraped or returned by evaluate actions."),
+  screenshotPath: z.string().optional().describe("Absolute path to the saved screenshot file, if taken."),
+  // --- Updated fields for knowledge save status ---
+  knowledgeSavePath: z.string().optional().describe("Full path where scraped data was saved in the knowledge base, if requested."),
+  // Renamed
+  saveSuccess: z.boolean().optional().describe("Indicates if saving scraped data to knowledge base was successful."),
+  saveError: z.string().optional().describe("Error message if saving scraped data to knowledge base failed."),
+  // --- End updated fields ---
+  success: z.boolean().describe("Whether the overall operation was successful."),
+  error: z.string().optional().describe("Error message if the operation failed.")
+});
+const PuppeteerInputSchema = z.object({
+  url: z.string().url().describe("The initial URL of the web page to navigate to."),
+  screenshot: z.boolean().optional().default(false).describe("Whether to take a full-page screenshot at the end."),
+  initialWaitForSelector: z.string().optional().describe("A CSS selector to wait for after initial navigation."),
+  actions: z.array(ActionSchema).optional().describe("A sequence of actions to perform on the page."),
+  // --- Fields for saving to knowledge base ---
+  saveKnowledgeFilename: z.string().optional().describe("Optional filename (e.g., 'scraped_results.json') to save scraped data within the knowledge base."),
+  saveFormat: z.enum(["json", "csv"]).optional().default("json").describe("Format to save the scraped data (default: json)."),
+  saveMode: z.nativeEnum(FileWriteMode).optional().default(FileWriteMode.OVERWRITE).describe("Write mode for saving data (overwrite, append, create-new)."),
+  saveEncoding: z.nativeEnum(FileEncoding).optional().default(FileEncoding.UTF8).describe("Encoding for saving data.")
+  // --- End fields ---
+});
+const puppeteerTool = createTool({
+  id: "puppeteer_web_automator",
+  description: "Navigates to a web page using Puppeteer, performs a sequence of actions (click, type, scrape, wait), optionally takes a screenshot, and returns page information and scraped data.",
+  inputSchema: PuppeteerInputSchema,
+  outputSchema: PuppeteerOutputSchema,
+  execute: async (executionContext) => {
+    const { context: input, container } = executionContext;
+    const span = createAISpan("puppeteer_tool_execution", {
+      "tool.id": "puppeteer_web_automator",
+      "input.url": input.url,
+      "input.actions_count": input.actions?.length ?? 0,
+      "input.screenshot_requested": input.screenshot ?? false,
+      "input.save_requested": !!input.saveKnowledgeFilename
+    });
+    let browser = null;
+    const output = {
+      url: input.url,
+      success: false,
+      scrapedData: []
+    };
+    const startTime = Date.now();
+    try {
+      logger$2.info(`Starting Puppeteer automation for URL: ${input.url}`);
+      span.addEvent("Automation started", { url: input.url });
+      if (input.screenshot) {
+        await fs__default.ensureDir(SCREENSHOT_DIR);
+        logger$2.debug(`Ensured screenshot directory exists: ${SCREENSHOT_DIR}`);
+      }
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"]
+      });
+      logger$2.debug("Puppeteer browser launched.");
+      const page = await browser.newPage();
+      logger$2.debug("New page created.");
+      await page.setViewport({ width: 1280, height: 800 });
+      logger$2.debug("Viewport set.");
+      logger$2.info(`Navigating to ${input.url}...`);
+      await page.goto(input.url, { waitUntil: "networkidle2", timeout: 6e4 });
+      output.url = page.url();
+      span.setAttribute("navigation.final_url", output.url);
+      logger$2.info(`Navigation complete. Current URL: ${output.url}`);
+      if (input.initialWaitForSelector) {
+        logger$2.info(`Waiting for initial selector: ${input.initialWaitForSelector}`);
+        await page.waitForSelector(input.initialWaitForSelector, { timeout: 3e4 });
+        logger$2.debug(`Initial selector found: ${input.initialWaitForSelector}`);
+      }
+      if (input.actions && input.actions.length > 0) {
+        logger$2.info(`Executing ${input.actions.length} actions...`);
+        span.addEvent("Executing actions", { count: input.actions.length });
+        for (const [index, action] of input.actions.entries()) {
+          logger$2.debug(`Executing action ${index + 1}: ${action.type}`);
+          try {
+            switch (action.type) {
+              case "click":
+                logger$2.info(`Clicking element: ${action.selector}`);
+                const clickPromise = page.click(action.selector);
+                if (action.waitForNavigation) {
+                  logger$2.debug("Waiting for navigation after click...");
+                  await Promise.all([clickPromise, page.waitForNavigation({ waitUntil: "networkidle2", timeout: 6e4 })]);
+                  output.url = page.url();
+                  logger$2.info(`Navigation after click complete. New URL: ${output.url}`);
+                } else {
+                  await clickPromise;
+                }
+                logger$2.debug(`Clicked element: ${action.selector}`);
+                break;
+              case "type":
+                logger$2.info(`Typing into element: ${action.selector}`);
+                await page.type(action.selector, action.text, { delay: action.delay });
+                logger$2.debug(`Typed text into: ${action.selector}`);
+                break;
+              case "scrape":
+                logger$2.info(`Scraping element(s): ${action.selector}` + (action.attribute ? ` [Attribute: ${action.attribute}]` : " [Text Content]"));
+                let scrapedItems = [];
+                if (action.multiple) {
+                  scrapedItems = await page.$$eval(
+                    action.selector,
+                    (elements, attr) => elements.map((el) => attr ? el.getAttribute(attr) : el.textContent?.trim() ?? null),
+                    action.attribute
+                  );
+                } else {
+                  const scrapedItem = await page.$eval(
+                    action.selector,
+                    (element, attr) => attr ? element.getAttribute(attr) : element.textContent?.trim() ?? null,
+                    action.attribute
+                  ).catch(() => null);
+                  if (scrapedItem !== null) {
+                    scrapedItems = [scrapedItem];
+                  }
+                }
+                output.scrapedData = [...output.scrapedData ?? [], ...scrapedItems];
+                logger$2.debug(`Scraped ${scrapedItems.length} items. Total scraped: ${output.scrapedData?.length}`);
+                break;
+              case "waitForSelector":
+                logger$2.info(`Waiting for selector: ${action.selector} (Timeout: ${action.timeout}ms)`);
+                await page.waitForSelector(action.selector, { timeout: action.timeout });
+                logger$2.debug(`Selector found: ${action.selector}`);
+                break;
+              case "scroll":
+                logger$2.info(`Scrolling ${action.direction}` + (action.selector ? ` within/to ${action.selector}` : " window"));
+                await page.evaluate(async (options) => {
+                  const element = options.selector ? document.querySelector(options.selector) : window;
+                  if (!element) throw new Error(`Scroll target not found: ${options.selector}`);
+                  const scrollAmount = options.amount ?? (options.direction === "down" || options.direction === "up" ? window.innerHeight : window.innerWidth);
+                  const target = options.selector && element !== window ? element : document.scrollingElement || document.documentElement;
+                  switch (options.direction) {
+                    case "down":
+                      target.scrollTop += scrollAmount;
+                      break;
+                    case "up":
+                      target.scrollTop -= scrollAmount;
+                      break;
+                    case "bottom":
+                      if (options.selector && element instanceof Element) {
+                        element.scrollTop = element.scrollHeight;
+                      } else {
+                        target.scrollTop = target.scrollHeight;
+                      }
+                      break;
+                    case "top":
+                      if (options.selector && element instanceof Element) {
+                        element.scrollTop = 0;
+                      } else {
+                        target.scrollTop = 0;
+                      }
+                      break;
+                  }
+                  await new Promise((resolve) => setTimeout(resolve, 100));
+                }, action);
+                logger$2.debug(`Scrolled ${action.direction}.`);
+                break;
+              case "hover":
+                logger$2.info(`Hovering over element: ${action.selector}`);
+                await page.hover(action.selector);
+                logger$2.debug(`Hovered over: ${action.selector}`);
+                break;
+              case "select":
+                logger$2.info(`Selecting option [value=${action.value}] in dropdown: ${action.selector}`);
+                await page.select(action.selector, action.value);
+                logger$2.debug(`Selected option in: ${action.selector}`);
+                break;
+              case "wait":
+                logger$2.info(`Waiting for ${action.duration}ms`);
+                await new Promise((resolve) => setTimeout(resolve, action.duration));
+                logger$2.debug("Wait complete.");
+                break;
+              case "evaluate":
+                logger$2.info(`Evaluating script...`);
+                const result = await page.evaluate(action.script);
+                if (result !== void 0) {
+                  output.scrapedData = [...output.scrapedData ?? [], result];
+                  logger$2.debug(`Script evaluated. Result added to scrapedData. Total scraped: ${output.scrapedData?.length}`);
+                } else {
+                  logger$2.debug(`Script evaluated. No return value.`);
+                }
+                break;
+              default:
+                const _exhaustiveCheck = action;
+                logger$2.error("Unsupported action type encountered", { action: _exhaustiveCheck });
+                throw new Error(`Unsupported action type encountered: ${JSON.stringify(_exhaustiveCheck)}`);
+            }
+          } catch (actionError) {
+            const errorMsg = `Error during action ${index + 1} (${action.type}): ${actionError.message}`;
+            logger$2.error(errorMsg, actionError);
+            throw new Error(errorMsg);
+          }
+        }
+        logger$2.info("All actions executed.");
+        span.addEvent("Actions completed");
+      }
+      output.pageTitle = await page.title();
+      logger$2.debug(`Final page title: ${output.pageTitle}`);
+      if (input.screenshot) {
+        const filename = generateScreenshotFilename(output.url);
+        const screenshotPath = path.join(SCREENSHOT_DIR, filename);
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        output.screenshotPath = screenshotPath;
+      }
+      if (input.saveKnowledgeFilename && output.scrapedData && output.scrapedData.length > 0) {
+        span.addEvent("Saving scraped data", { filename: input.saveKnowledgeFilename, count: output.scrapedData.length });
+        let contentToSave = "";
+        try {
+          if (input.saveFormat === "json") {
+            contentToSave = JSON.stringify(output.scrapedData, null, 2);
+          } else if (input.saveFormat === "csv") {
+            if (output.scrapedData.every((item) => typeof item === "object" && item !== null)) {
+              const headers = Object.keys(output.scrapedData[0]).join(",");
+              const rows = output.scrapedData.map(
+                (item) => Object.values(item).map((val) => JSON.stringify(val)).join(",")
+              );
+              contentToSave = `${headers}
+${rows.join("\n")}`;
+            } else {
+              throw new Error("CSV format requires scraped data to be an array of objects.");
+            }
+          } else {
+            throw new Error(`Unsupported save format: ${input.saveFormat}`);
+          }
+          if (!writeKnowledgeFileTool?.execute) {
+            throw new Error("writeKnowledgeFileTool.execute is not defined or tool not imported correctly.");
+          }
+          const writeResult = await writeKnowledgeFileTool.execute({
+            context: {
+              path: input.saveKnowledgeFilename,
+              content: contentToSave,
+              mode: input.saveMode,
+              encoding: input.saveEncoding,
+              createDirectory: true
+            },
+            container
+          });
+          if (writeResult.success) {
+            span.setAttribute("output.save_path", writeResult.metadata.path);
+            span.addEvent("Save successful");
+            output.knowledgeSavePath = writeResult.metadata.path;
+            output.saveSuccess = true;
+            logger$2.info(`Successfully saved scraped data to knowledge base: ${output.knowledgeSavePath}`);
+          } else {
+            span.addEvent("Save failed", { error: output.saveError });
+            output.saveSuccess = false;
+            output.saveError = writeResult.error || "Unknown error saving to knowledge base.";
+            logger$2.error(`Failed to save scraped data to knowledge base: ${output.saveError}`);
+          }
+        } catch (saveError) {
+          output.saveSuccess = false;
+          output.saveError = saveError instanceof Error ? saveError.message : String(saveError);
+          logger$2.error(`Error preparing or saving scraped data to knowledge base: ${output.saveError}`);
+        }
+      } else if (input.saveKnowledgeFilename) {
+        logger$2.warn(`Knowledge base filename provided (${input.saveKnowledgeFilename}), but no scraped data to save.`);
+      }
+      output.success = true;
+      logger$2.info("Puppeteer automation completed successfully.");
+      span.setAttribute("output.scraped_count", output.scrapedData?.length ?? 0);
+      recordMetrics(span, {
+        status: "success",
+        latencyMs: Date.now() - startTime
+        // 'output.scraped_count' is now a span attribute, not a metric
+      });
+    } catch (error) {
+      logger$2.error(`Puppeteer tool error: ${error.message}`, error);
+      output.error = error instanceof Error ? error.message : String(error);
+      output.success = false;
+      recordMetrics(span, {
+        status: "error",
+        errorMessage: output.error,
+        latencyMs: Date.now() - startTime
+      });
+      span.recordException(error);
+    } finally {
+      if (browser) {
+        await browser.close();
+        logger$2.info("Browser closed.");
+        span.addEvent("Browser closed");
+      }
+      span.end();
+    }
+    return output;
+  }
+});
 
 const math = create(all);
 const calculatorTool = createTool({
@@ -6442,6 +6798,7 @@ try {
 }
 extraTools.push(ensureToolOutputSchema(getMainBranchRef));
 extraTools.push(...tracingTools);
+extraTools.push(ensureToolOutputSchema(puppeteerTool));
 const optionalTools = Object.values(searchTools).filter((tool) => tool !== void 0);
 const allTools = Object.freeze([...coreTools, ...optionalTools, ...additionalTools, ...extraTools]);
 const allToolsMap = new Map(allTools.map((tool) => [tool.id, tool]));
@@ -6466,4 +6823,4 @@ logger.info(`E2B tools included: ${extraTools.some((t) => t.id.startsWith("e2b_"
 logger.info(`Arxiv tools included: ${extraTools.some((t) => t.id.startsWith("arxiv_"))}`);
 logger.info(`AI SDK tools included: ${extraTools.some((t) => t.id.startsWith("ai-sdk_"))}`);
 
-export { AiSdkPromptOutputSchema, ArXivClient, ArxivDownloadPdfOutputSchema, ArxivPdfUrlOutputSchema, ArxivSearchEntrySchema, ArxivSearchOutputSchema, CryptoAggregatesSchema, CryptoTickersSchema, E2BOutputSchema, createExaSearchProvider as ExaSearchOutputSchema, ExaSearchProvider, FeedbackType, FileEncoding, FileWriteMode, GitHubBranchSchema, GitHubBranchesListSchema, GitHubClient, GitHubCodeSearchItemSchema, GitHubCodeSearchResultsSchema, GitHubCommitSchema, GitHubCommitsListSchema, GitHubIssueSchema, GitHubIssuesListSchema, GitHubPullSchema, GitHubPullsListSchema, GitHubReleaseSchema, GitHubReleasesListSchema, GitHubRepoSchema, GitHubReposListSchema, GitHubUserSchema, LLMChainOutputSchema, MastraPolygonClient, MastraRedditClient, PreviousCloseSchema, RewardType, SubredditPostSchema, SubredditPostsSchema, TickerAggregatesSchema, TickerDetailsSchema, TickerNewsSchema, WikipediaClient, WikipediaPageResultSchema, WikipediaSearchSchema, WikipediaSummarySchema, WikipediaThumbnailSchema, aiSdkPromptTool, allTools, allToolsMap, analyzeContentTool, analyzeFeedbackTool, applyRLInsightsTool, arxiv, calculateRewardTool, calculatorTool as calculator, collectFeedbackTool, createAISDKTools, createAISpan, createArxivClient, createBraveSearchTool, createE2BSandboxTool, createExaSearchProvider, createFileTool, createGitHubClient, createGoogleSearchTool, createGraphRagTool, createHttpSpan, createLlamaIndexTools, createMastraAISDKTools, createMastraArxivTools, createMastraE2BTools, createMastraExaSearchTools, createMastraGitHubTools, createMastraLLMChainTools, createMastraLlamaIndexTools, createMastraMcpTools, createMastraPolygonTools, createMastraRedditTools, createMastraVectorQueryTool, createMastraWikipediaTools, createTavilySearchTool, createWikipediaClient, csvReaderTool, allToolsMap as default, defineRewardFunctionTool, deleteFileTool, docxReaderTool, e2b, editFileTool, embedDocumentTool, extractHtmlTextTool, filteredQueryTool, formatContentTool, getMainBranchRef, getOpenTelemetrySdk, getTracer, getUnreadFeedbackThreads, googleVectorQueryTool, graphRagQueryTool, toolGroups as groups, initOpenTelemetry, initOpenTelemetryTool, initSigNoz, initializeDefaultTracing, jsonReaderTool, listFilesTool, llmChainTool, logWithTraceContext, optimizePolicyTool, readFileTool, readKnowledgeFileTool, recordLlmMetrics, recordLlmMetricsTool, recordMetrics, searchDocumentsTool, shutdownSigNoz, shutdownTracingTool, startAISpanTool, toolGroups, allToolsMap as toolMap, tracingTools, vectorQueryTool, wikipedia, writeKnowledgeFileTool, writeToFileTool };
+export { AiSdkPromptOutputSchema, ArXivClient, ArxivDownloadPdfOutputSchema, ArxivPdfUrlOutputSchema, ArxivSearchEntrySchema, ArxivSearchOutputSchema, CryptoAggregatesSchema, CryptoTickersSchema, E2BOutputSchema, createExaSearchProvider as ExaSearchOutputSchema, ExaSearchProvider, FeedbackType, FileEncoding, FileWriteMode, GitHubBranchSchema, GitHubBranchesListSchema, GitHubClient, GitHubCodeSearchItemSchema, GitHubCodeSearchResultsSchema, GitHubCommitSchema, GitHubCommitsListSchema, GitHubIssueSchema, GitHubIssuesListSchema, GitHubPullSchema, GitHubPullsListSchema, GitHubReleaseSchema, GitHubReleasesListSchema, GitHubRepoSchema, GitHubReposListSchema, GitHubUserSchema, LLMChainOutputSchema, MastraPolygonClient, MastraRedditClient, PreviousCloseSchema, RewardType, SubredditPostSchema, SubredditPostsSchema, TickerAggregatesSchema, TickerDetailsSchema, TickerNewsSchema, WikipediaClient, WikipediaPageResultSchema, WikipediaSearchSchema, WikipediaSummarySchema, WikipediaThumbnailSchema, aiSdkPromptTool, allTools, allToolsMap, analyzeContentTool, analyzeFeedbackTool, applyRLInsightsTool, arxiv, calculateRewardTool, calculatorTool as calculator, collectFeedbackTool, createAISDKTools, createAISpan, createArxivClient, createBraveSearchTool, createE2BSandboxTool, createExaSearchProvider, createFileTool, createGitHubClient, createGoogleSearchTool, createGraphRagTool, createHttpSpan, createLlamaIndexTools, createMastraAISDKTools, createMastraArxivTools, createMastraE2BTools, createMastraExaSearchTools, createMastraGitHubTools, createMastraLLMChainTools, createMastraLlamaIndexTools, createMastraMcpTools, createMastraPolygonTools, createMastraRedditTools, createMastraVectorQueryTool, createMastraWikipediaTools, createTavilySearchTool, createWikipediaClient, csvReaderTool, allToolsMap as default, defineRewardFunctionTool, deleteFileTool, docxReaderTool, e2b, editFileTool, embedDocumentTool, extractHtmlTextTool, filteredQueryTool, formatContentTool, getMainBranchRef, getOpenTelemetrySdk, getTracer, getUnreadFeedbackThreads, googleVectorQueryTool, graphRagQueryTool, toolGroups as groups, initOpenTelemetry, initOpenTelemetryTool, initSigNoz, initializeDefaultTracing, jsonReaderTool, listFilesTool, llmChainTool, logWithTraceContext, optimizePolicyTool, puppeteerTool, readFileTool, readKnowledgeFileTool, recordLlmMetrics, recordLlmMetricsTool, recordMetrics, searchDocumentsTool, shutdownSigNoz, shutdownTracingTool, startAISpanTool, toolGroups, allToolsMap as toolMap, tracingTools, vectorQueryTool, wikipedia, writeKnowledgeFileTool, writeToFileTool };

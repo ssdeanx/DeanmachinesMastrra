@@ -25,6 +25,7 @@ Welcome to the **DeanMachines Mastra AI Workspace**! This monorepo contains the 
   - [Development \& Conventions](#development--conventions)
   - [Changelog](#changelog)
   - [Notes for AI Assistants](#notes-for-ai-assistants)
+  - [AI Assistant Notes (For GitHub Copilot / Collaborators)](#ai-assistant-notes-for-github-copilot--collaborators)
   - [Additional AI Assistant Guidance (2025-04-15)](#additional-ai-assistant-guidance-2025-04-15)
   - [Current Progress (as of 2025-04-16)](#current-progress-as-of-2025-04-16)
   - [Project Roadmap (Gantt Diagram)](#project-roadmap-gantt-diagram)
@@ -495,6 +496,43 @@ See [CHANGELOG.md](./CHANGELOG.md) for a detailed history of changes, releases, 
 
 ---
 
+## AI Assistant Notes (For GitHub Copilot / Collaborators)
+
+*   **Workspace Context:** You are working within the `c:\Users\dm\Documents\Backup\DeanmachinesMastrra` directory on Windows.
+*   **Core Technologies:** Mastra AI framework, TypeScript, Zod (for schemas), Puppeteer (for browser automation), SigNoz/OpenTelemetry (for tracing), various LLM providers (Google, OpenAI, Anthropic, etc.).
+*   **Key Files:**
+    *   `src/mastra/tools/index.ts`: The main "barrel" file where all tools are registered and exported. **Crucial for tool discovery.**
+    *   `src/mastra/tools/`: Directory containing individual tool implementations (e.g., `puppeteerTool.ts`, `readwrite.ts`, `document-tools.ts`).
+    *   `src/mastra/agents/`: Directory containing agent configurations.
+    *   `src/mastra/workflows/`: Directory containing workflow definitions.
+    *   `src/mastra/services/`: Directory for shared services like tracing (`signoz.ts`) and database interactions.
+    *   `CHANGELOG.md`: **Check this file frequently** for recent changes, additions, and context on the current state of development.
+    *   `package.json`: Lists project dependencies.
+*   **Recent Major Additions (See `CHANGELOG.md` v0.0.15):**
+    *   **`puppeteerTool`:** A powerful tool for browser automation was added (`src/mastra/tools/puppeteerTool.ts`). It supports complex action sequences (clicking, typing, scraping, scrolling, etc.) defined via its input schema.
+    *   **Knowledge Base Saving:** `puppeteerTool` can now save its scraped results directly to the knowledge base using the `writeKnowledgeFileTool` from `src/mastra/tools/readwrite.ts`. This requires providing `saveKnowledgeFilename` and related options in the input.
+    *   **Tracing:** `puppeteerTool` is fully integrated with SigNoz tracing, providing detailed observability.
+    *   **Registration:** `puppeteerTool` is correctly registered in `src/mastra/tools/index.ts`.
+*   **Development Workflow:**
+    1.  **Understand the Goal:** Clarify the user's request.
+    2.  **Check `CHANGELOG.md`:** Review recent changes for context.
+    3.  **Identify Relevant Files:** Locate the files needing modification (e.g., specific tool, agent config, barrel file).
+    4.  **Implement Changes:** Write or modify the TypeScript code.
+        *   Use Zod for defining input/output schemas for tools and agents.
+        *   Leverage existing tools (like `writeKnowledgeFileTool`) when possible by importing them and calling their `.execute()` method, passing the necessary `context` and `container`.
+        *   Integrate logging (`logger.info`, `logger.debug`, etc.) and tracing (`createAISpan`, `recordMetrics`, `span.addEvent`) for observability.
+    5.  **Register Tools:** If adding a new tool, ensure it's imported and added to the appropriate arrays/maps in `src/mastra/tools/index.ts`.
+    6.  **Update `CHANGELOG.md`:** Document the changes clearly, including file paths and key implementation details.
+    7.  **Lint & Type Check:** Assume the user runs `eslint` and `tsc` after changes. Aim for code that passes these checks. **Do not introduce type errors.**
+*   **Key Commands (Assume user runs these):**
+    *   `pnpm install`: Install dependencies.
+    *   `pnpm run dev`: Start the development server (likely using `mastra dev`).
+    *   `pnpm run lint`: Check code style.
+    *   `pnpm run typecheck`: Check TypeScript types.
+*   **Goal:** Maintain a robust, type-safe, observable, and well-documented Mastra AI backend. Follow user instructions carefully and leverage the existing framework patterns.
+
+---
+
 ## Additional AI Assistant Guidance (2025-04-15)
 
 - **Provider Support:**
@@ -708,4 +746,3 @@ graph TD
     10875["Observability Service<br>TypeScript"] -->|sends data to| 10884["Langfuse<br>External Service"]
     10875["Observability Service<br>TypeScript"] -->|sends data to| 10885["Signoz / OpenTelemetry<br>External Service"]
     10878["Integration Adapters<br>TypeScript"] -->|connect to| 10897["GitHub API<br>External API"]
-```

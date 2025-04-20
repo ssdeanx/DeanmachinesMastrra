@@ -66,6 +66,7 @@ import { MCPConfiguration } from '@mastra/mcp';
 import { GithubIntegration } from '@mastra/github';
 import { PolygonClient } from '@agentic/polygon';
 import { RedditClient } from '@agentic/reddit';
+import puppeteer from 'puppeteer';
 import { Workflow, Step } from '@mastra/core/workflows';
 import { AgentNetwork } from '@mastra/core/network';
 import { readFile } from 'fs/promises';
@@ -153,12 +154,12 @@ const OTelAttributeNames = {
   TOTAL_TOKENS: "ai.tokens.total",
   LATENCY_MS: "ai.latency.ms"};
 
-const logger$t = createLogger({ name: "signoz-service", level: "info" });
+const logger$u = createLogger({ name: "signoz-service", level: "info" });
 let tracerProvider = null;
 let tracer = null;
 function initSigNoz(config) {
   if (config.enabled === false) {
-    logger$t.info("SigNoz tracing is disabled");
+    logger$u.info("SigNoz tracing is disabled");
     return { tracer: null, meter: null };
   }
   if (tracer) {
@@ -168,7 +169,7 @@ function initSigNoz(config) {
     const serviceName = config.serviceName || "deanmachines-ai";
     const endpoint = config.export?.endpoint || env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces";
     const headers = config.export?.headers || {};
-    logger$t.info(`Initializing SigNoz tracing for service: ${serviceName}`, { endpoint });
+    logger$u.info(`Initializing SigNoz tracing for service: ${serviceName}`, { endpoint });
     const resource = resourceFromAttributes({
       [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
       [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: env.NODE_ENV || "development"
@@ -181,7 +182,7 @@ function initSigNoz(config) {
     processors.push(new BatchSpanProcessor(otlpExporter));
     if (env.NODE_ENV !== "production") {
       processors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
-      logger$t.debug("Added console span exporter for debugging");
+      logger$u.debug("Added console span exporter for debugging");
     }
     tracerProvider = new NodeTracerProvider({
       resource,
@@ -189,7 +190,7 @@ function initSigNoz(config) {
     });
     tracerProvider.register();
     tracer = api.trace.getTracer("deanmachines-tracer");
-    logger$t.info("SigNoz tracing initialized successfully");
+    logger$u.info("SigNoz tracing initialized successfully");
     const metricExporter = new OTLPMetricExporter({
       url: env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT || endpoint.replace("/v1/traces", "/v1/metrics"),
       headers
@@ -205,11 +206,11 @@ function initSigNoz(config) {
       readers: [metricReader]
     });
     if (env.NODE_ENV !== "production") {
-      logger$t.debug("SigNoz metrics exporter configured");
+      logger$u.debug("SigNoz metrics exporter configured");
     }
     return { tracer, meter: meterProvider };
   } catch (error) {
-    logger$t.error("Failed to initialize SigNoz tracing", {
+    logger$u.error("Failed to initialize SigNoz tracing", {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : void 0
     });
@@ -224,7 +225,7 @@ function getTracer() {
 }
 function createAISpan(name, attributes = {}) {
   if (!tracer) {
-    logger$t.warn("Creating span without initialized SigNoz tracing");
+    logger$u.warn("Creating span without initialized SigNoz tracing");
     return api.trace.getTracer("no-op").startSpan(name);
   }
   return tracer.startSpan(name, {
@@ -306,7 +307,7 @@ var signoz = {
   }
 };
 
-const logger$s = createLogger({ name: "opentelemetry-tracing", level: "info" });
+const logger$t = createLogger({ name: "opentelemetry-tracing", level: "info" });
 function initOpenTelemetry({
   serviceName = "deanmachines-ai",
   serviceVersion = "1.0.0",
@@ -317,7 +318,7 @@ function initOpenTelemetry({
   metricsIntervalMs = 6e4
 }) {
   if (!enabled) {
-    logger$s.info("OpenTelemetry tracing is disabled");
+    logger$t.info("OpenTelemetry tracing is disabled");
     return null;
   }
   const exporterUrl = endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4317/v1/traces";
@@ -341,23 +342,23 @@ function initOpenTelemetry({
       exportIntervalMillis: metricsIntervalMs
     });
     sdkConfig.metricReader = metricReader;
-    logger$s.info("OpenTelemetry metrics enabled");
+    logger$t.info("OpenTelemetry metrics enabled");
   }
   const sdk = new NodeSDK(sdkConfig);
   try {
     sdk.start();
-    logger$s.info("OpenTelemetry SDK initialized successfully");
+    logger$t.info("OpenTelemetry SDK initialized successfully");
   } catch (initError) {
-    logger$s.error("Error initializing OpenTelemetry SDK", {
+    logger$t.error("Error initializing OpenTelemetry SDK", {
       error: initError instanceof Error ? initError.message : String(initError)
     });
   }
   process$1.on("SIGTERM", async () => {
     try {
       await sdk.shutdown();
-      logger$s.info("OpenTelemetry SDK shut down successfully");
+      logger$t.info("OpenTelemetry SDK shut down successfully");
     } catch (shutdownError) {
-      logger$s.error("Error shutting down OpenTelemetry SDK", {
+      logger$t.error("Error shutting down OpenTelemetry SDK", {
         error: shutdownError instanceof Error ? shutdownError.message : String(shutdownError)
       });
     } finally {
@@ -1755,7 +1756,8 @@ const researchAgentConfig = {
     "token-count-eval",
     "create-graph-rag",
     "graph-rag-query",
-    "wikipedia_get_page_summary"
+    "wikipedia_get_page_summary",
+    "puppeteer_web_automator"
   ]
 };
 z.object({
@@ -2591,7 +2593,7 @@ z.object({
   ).optional().describe("Recommendations for further improvements")
 });
 
-const logger$r = createLogger({ name: "langfuse-service", level: "info" });
+const logger$s = createLogger({ name: "langfuse-service", level: "info" });
 const envSchema$2 = z.object({
   LANGFUSE_PUBLIC_KEY: z.string().min(1, "Langfuse public key is required"),
   LANGFUSE_SECRET_KEY: z.string().min(1, "Langfuse secret key is required"),
@@ -2604,12 +2606,12 @@ function validateEnv() {
     if (error instanceof z.ZodError) {
       const missingKeys = error.errors.filter((e) => e.code === "invalid_type" && e.received === "undefined").map((e) => e.path.join("."));
       if (missingKeys.length > 0) {
-        logger$r.error(
+        logger$s.error(
           `Missing required environment variables: ${missingKeys.join(", ")}`
         );
       }
     }
-    logger$r.error("Langfuse environment validation failed:", { error });
+    logger$s.error("Langfuse environment validation failed:", { error });
     throw new Error(
       `Langfuse service configuration error: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -2624,7 +2626,7 @@ function createLangfuseClient() {
       baseUrl: validatedEnv$1.LANGFUSE_HOST
     });
   } catch (error) {
-    logger$r.error("Failed to create Langfuse client:", { error });
+    logger$s.error("Failed to create Langfuse client:", { error });
     throw new Error(
       `Langfuse client creation failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -2645,10 +2647,10 @@ class LangfuseService {
    */
   createTrace(name, options) {
     try {
-      logger$r.debug("Creating Langfuse trace", { name, ...options });
+      logger$s.debug("Creating Langfuse trace", { name, ...options });
       return this.client.trace({ name, ...options });
     } catch (error) {
-      logger$r.error("Error creating trace:", { error, name });
+      logger$s.error("Error creating trace:", { error, name });
       throw new Error(`Failed to create Langfuse trace: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2661,10 +2663,10 @@ class LangfuseService {
    */
   createSpan(name, options) {
     try {
-      logger$r.debug("Creating Langfuse span", { name, ...options });
+      logger$s.debug("Creating Langfuse span", { name, ...options });
       return this.client.span({ name, ...options });
     } catch (error) {
-      logger$r.error("Error creating span:", { error, name });
+      logger$s.error("Error creating span:", { error, name });
       throw new Error(`Failed to create Langfuse span: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2677,10 +2679,10 @@ class LangfuseService {
    */
   logGeneration(name, options) {
     try {
-      logger$r.debug("Logging Langfuse generation", { name, ...options });
+      logger$s.debug("Logging Langfuse generation", { name, ...options });
       return this.client.generation({ name, ...options });
     } catch (error) {
-      logger$r.error("Error logging generation:", { error, name });
+      logger$s.error("Error logging generation:", { error, name });
       throw new Error(`Failed to log Langfuse generation: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2693,13 +2695,13 @@ class LangfuseService {
    */
   createScore(options) {
     try {
-      logger$r.debug("Creating Langfuse score", options);
+      logger$s.debug("Creating Langfuse score", options);
       if (!options.traceId && !options.spanId && !options.generationId) {
         throw new Error("At least one of traceId, spanId, or generationId must be provided");
       }
       return this.client.score(options);
     } catch (error) {
-      logger$r.error("Error creating score:", { error, name: options.name });
+      logger$s.error("Error creating score:", { error, name: options.name });
       throw new Error(`Failed to create Langfuse score: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2711,16 +2713,16 @@ class LangfuseService {
   async flush() {
     try {
       await this.client.flush();
-      logger$r.debug("Flushed Langfuse events");
+      logger$s.debug("Flushed Langfuse events");
     } catch (error) {
-      logger$r.error("Error flushing Langfuse events:", { error });
+      logger$s.error("Error flushing Langfuse events:", { error });
       throw new Error(`Failed to flush Langfuse events: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
 const langfuse = new LangfuseService();
 
-const logger$q = createLogger({ name: "mastra-hooks", level: "debug" });
+const logger$r = createLogger({ name: "mastra-hooks", level: "debug" });
 function createResponseHook(config = {}) {
   const {
     minResponseLength = 10,
@@ -2735,7 +2737,7 @@ function createResponseHook(config = {}) {
       const currentSpan = trace.getSpan(currentContext);
       const traceId = currentSpan?.spanContext().traceId;
       const spanId = currentSpan?.spanContext().spanId;
-      logger$q.debug(`Response hook executing (attempt ${attempt}/${maxAttempts})`, {
+      logger$r.debug(`Response hook executing (attempt ${attempt}/${maxAttempts})`, {
         traceId,
         spanId,
         hasText: !!response.text,
@@ -2750,7 +2752,7 @@ function createResponseHook(config = {}) {
             comment: `Response validation attempt ${attempt}/${maxAttempts}`
           });
         } catch (err) {
-          logger$q.warn("Failed to record validation in Langfuse", { error: err });
+          logger$r.warn("Failed to record validation in Langfuse", { error: err });
         }
       }
       if (validateResponse(response)) {
@@ -2768,10 +2770,10 @@ function createResponseHook(config = {}) {
             hookSpan.setAttribute("response.attempt", attempt);
             hookSpan.end();
           }
-          logger$q.info(`Empty response, retrying (${attempt}/${maxAttempts})`);
+          logger$r.info(`Empty response, retrying (${attempt}/${maxAttempts})`);
           return onResponse(response, attempt + 1);
         }
-        logger$q.warn(`Maximum retry attempts reached (${maxAttempts})`);
+        logger$r.warn(`Maximum retry attempts reached (${maxAttempts})`);
         if (hookSpan) {
           hookSpan.setStatus({
             code: SpanStatusCode$1.ERROR,
@@ -2785,7 +2787,7 @@ function createResponseHook(config = {}) {
         };
       }
       if (response.text && response.text.length < minResponseLength) {
-        logger$q.debug(`Response too short (${response.text.length} < ${minResponseLength}), adding suggestion for elaboration`);
+        logger$r.debug(`Response too short (${response.text.length} < ${minResponseLength}), adding suggestion for elaboration`);
         if (hookSpan) {
           hookSpan.setAttribute("response.tooShort", true);
           hookSpan.setAttribute("response.length", response.text.length);
@@ -2802,7 +2804,7 @@ function createResponseHook(config = {}) {
       }
       return response;
     } catch (error) {
-      logger$q.error("Response hook error:", { error });
+      logger$r.error("Response hook error:", { error });
       if (hookSpan) {
         hookSpan.setStatus({
           code: SpanStatusCode$1.ERROR,
@@ -2879,7 +2881,7 @@ function createEmbeddings(apiKey, modelName) {
   });
 }
 
-const logger$p = createLogger({ name: "vector-query-tool", level: "info" });
+const logger$q = createLogger({ name: "vector-query-tool", level: "info" });
 const envSchema$1 = z.object({
   GOOGLE_AI_API_KEY: z.string().min(1, "Google AI API key is required"),
   PINECONE_INDEX: z.string().default("Default"),
@@ -2890,7 +2892,7 @@ const validatedEnv = (() => {
   try {
     return envSchema$1.parse(env);
   } catch (error) {
-    logger$p.error("Environment validation failed:", { error });
+    logger$q.error("Environment validation failed:", { error });
     throw new Error(
       `Vector query tool configuration error: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -2905,12 +2907,12 @@ function createMastraVectorQueryTool(config = {}) {
     const dimensions = config.dimensions || validatedEnv.PINECONE_DIMENSION;
     const apiKey = config.apiKey || validatedEnv.GOOGLE_AI_API_KEY;
     const topK = config.topK || 5;
-    logger$p.info(
+    logger$q.info(
       `Creating vector query tool for ${vectorStoreName}:${indexName}`
     );
     let embeddingModel;
     if (embeddingProvider === "tiktoken") {
-      logger$p.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
+      logger$q.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
       const tiktokenAdapter = {
         specificationVersion: "v1",
         provider: "tiktoken",
@@ -2934,7 +2936,7 @@ function createMastraVectorQueryTool(config = {}) {
             }
             return { embeddings: [{ embedding }] };
           } catch (error) {
-            logger$p.error("Tiktoken embedding error:", { error });
+            logger$q.error("Tiktoken embedding error:", { error });
             throw new Error(
               `Tiktoken embedding failed: ${error instanceof Error ? error.message : String(error)}`
             );
@@ -2964,7 +2966,7 @@ function createMastraVectorQueryTool(config = {}) {
       };
       embeddingModel = tiktokenAdapter;
     } else {
-      logger$p.info("Using Google embeddings");
+      logger$q.info("Using Google embeddings");
       embeddingModel = createEmbeddings(
         apiKey,
         "models/gemini-embedding-exp-03-07"
@@ -2992,10 +2994,10 @@ function createMastraVectorQueryTool(config = {}) {
       description,
       enableFilter: config.enableFilters
     });
-    logger$p.info(`Vector query tool created: ${toolId}`);
+    logger$q.info(`Vector query tool created: ${toolId}`);
     return tool;
   } catch (error) {
-    logger$p.error("Failed to create vector query tool:", { error });
+    logger$q.error("Failed to create vector query tool:", { error });
     throw new Error(
       `Vector query tool creation failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -3463,6 +3465,21 @@ async function trackFeedback(runId, feedback) {
 }
 configureLangSmithTracing();
 
+var FileEncoding = /* @__PURE__ */ ((FileEncoding2) => {
+  FileEncoding2["UTF8"] = "utf8";
+  FileEncoding2["ASCII"] = "ascii";
+  FileEncoding2["UTF16LE"] = "utf16le";
+  FileEncoding2["LATIN1"] = "latin1";
+  FileEncoding2["BASE64"] = "base64";
+  FileEncoding2["HEX"] = "hex";
+  return FileEncoding2;
+})(FileEncoding || {});
+var FileWriteMode = /* @__PURE__ */ ((FileWriteMode2) => {
+  FileWriteMode2["OVERWRITE"] = "overwrite";
+  FileWriteMode2["APPEND"] = "append";
+  FileWriteMode2["CREATE_NEW"] = "create-new";
+  return FileWriteMode2;
+})(FileWriteMode || {});
 const KNOWLEDGE_BASE_PATH = resolve(process.cwd(), "src", "mastra", "knowledge");
 function isKnowledgePath(path) {
   const absolutePath = resolve(path);
@@ -3837,7 +3854,7 @@ const writeKnowledgeFileTool = createTool({
     success: z.boolean().describe("Whether the operation was successful"),
     error: z.string().optional().describe("Error message if the operation failed")
   }),
-  execute: async ({ context }) => {
+  execute: async ({ context, container }) => {
     const runId = await createLangSmithRun("write-knowledge-file", [
       "knowledge",
       "write"
@@ -3851,11 +3868,13 @@ const writeKnowledgeFileTool = createTool({
         throw new Error("writeToFileTool.execute is not defined");
       }
       return writeToFileTool.execute({
+        container,
+        // Pass the container
         context: {
           ...context,
           path: knowledgePath,
           // Provide the default value from writeToFileTool's schema
-          maxSizeBytes: 10485760
+          maxSizeBytes: 100485760
         }
       });
     } catch (error) {
@@ -4089,7 +4108,7 @@ const listFilesTool = createTool({
   }
 });
 
-const logger$o = createLogger({ name: "thread-manager", level: "info" });
+const logger$p = createLogger({ name: "thread-manager", level: "info" });
 class ThreadManager {
   threads = /* @__PURE__ */ new Map();
   resourceThreads = /* @__PURE__ */ new Map();
@@ -4103,7 +4122,7 @@ class ThreadManager {
    */
   async createThread(options) {
     const span = createAISpan("thread.create", { resourceId: options.resourceId });
-    logger$o.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
+    logger$p.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
     const startTime = Date.now();
     let runId;
     try {
@@ -4119,7 +4138,7 @@ class ThreadManager {
         this.resourceThreads.set(options.resourceId, /* @__PURE__ */ new Set());
       }
       this.resourceThreads.get(options.resourceId)?.add(threadId);
-      logger$o.info("Thread created", { threadId, resourceId: options.resourceId });
+      logger$p.info("Thread created", { threadId, resourceId: options.resourceId });
       span.setStatus({ code: 1 });
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "success" });
       runId = await createLangSmithRun("thread.create", [options.resourceId]);
@@ -4128,7 +4147,7 @@ class ThreadManager {
     } catch (error) {
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "error", errorMessage: String(error) });
       if (runId) await trackFeedback(runId, { score: 0, comment: "Thread creation failed", value: error });
-      logger$o.error("Failed to create thread", { error });
+      logger$p.error("Failed to create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -4145,11 +4164,11 @@ class ThreadManager {
     const span = createAISpan("thread.get", { threadId });
     try {
       const thread = this.threads.get(threadId);
-      logger$o.info("Get thread", { threadId, found: !!thread });
+      logger$p.info("Get thread", { threadId, found: !!thread });
       span.setStatus({ code: 1 });
       return thread;
     } catch (error) {
-      logger$o.error("Failed to get thread", { error });
+      logger$p.error("Failed to get thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -4167,11 +4186,11 @@ class ThreadManager {
     try {
       const threadIds = this.resourceThreads.get(resourceId) || /* @__PURE__ */ new Set();
       const threads = Array.from(threadIds).map((id) => this.threads.get(id)).filter((thread) => thread !== void 0);
-      logger$o.info("Get threads by resource", { resourceId, count: threads.length });
+      logger$p.info("Get threads by resource", { resourceId, count: threads.length });
       span.setStatus({ code: 1 });
       return threads;
     } catch (error) {
-      logger$o.error("Failed to get threads by resource", { error });
+      logger$p.error("Failed to get threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -4189,16 +4208,16 @@ class ThreadManager {
     try {
       const threads = this.getThreadsByResource(resourceId);
       if (threads.length === 0) {
-        logger$o.info("No threads found for resource", { resourceId });
+        logger$p.info("No threads found for resource", { resourceId });
         span.setStatus({ code: 1 });
         return void 0;
       }
       const mostRecent = threads.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-      logger$o.info("Most recent thread", { resourceId, threadId: mostRecent.id });
+      logger$p.info("Most recent thread", { resourceId, threadId: mostRecent.id });
       span.setStatus({ code: 1 });
       return mostRecent;
     } catch (error) {
-      logger$o.error("Failed to get most recent thread", { error });
+      logger$p.error("Failed to get most recent thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -4217,16 +4236,16 @@ class ThreadManager {
     try {
       const existingThread = this.getMostRecentThread(resourceId);
       if (existingThread) {
-        logger$o.info("Found existing thread", { resourceId, threadId: existingThread.id });
+        logger$p.info("Found existing thread", { resourceId, threadId: existingThread.id });
         span.setStatus({ code: 1 });
         return existingThread;
       }
-      logger$o.info("No existing thread, creating new", { resourceId });
+      logger$p.info("No existing thread, creating new", { resourceId });
       const newThread = await this.createThread({ resourceId, metadata });
       span.setStatus({ code: 1 });
       return newThread;
     } catch (error) {
-      logger$o.error("Failed to get or create thread", { error });
+      logger$p.error("Failed to get or create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -4245,11 +4264,11 @@ class ThreadManager {
       const thread = this.threads.get(threadId);
       if (thread) {
         thread.lastReadAt = date;
-        logger$o.info("Marked thread as read", { threadId, date });
+        logger$p.info("Marked thread as read", { threadId, date });
       }
       span.setStatus({ code: 1 });
     } catch (error) {
-      logger$o.error("Failed to mark thread as read", { error });
+      logger$p.error("Failed to mark thread as read", { error });
       span.setStatus({ code: 2, message: String(error) });
     } finally {
       span.end();
@@ -4268,11 +4287,11 @@ class ThreadManager {
         const lastRead = this.threadReadStatus.get(thread.id);
         return !lastRead || thread.createdAt > lastRead;
       });
-      logger$o.info("Get unread threads by resource", { resourceId, count: unread.length });
+      logger$p.info("Get unread threads by resource", { resourceId, count: unread.length });
       span.setStatus({ code: 1 });
       return unread;
     } catch (error) {
-      logger$o.error("Failed to get unread threads by resource", { error });
+      logger$p.error("Failed to get unread threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -4729,8 +4748,8 @@ function determineTrend(values) {
   return "stable";
 }
 
-const logger$n = createLogger({ name: "Memory", level: "debug" });
-logger$n.info("Initializing Memory with LibSQL storage");
+const logger$o = createLogger({ name: "Memory", level: "debug" });
+logger$o.info("Initializing Memory with LibSQL storage");
 const defaultMemoryConfig = {
   lastMessages: 200,
   semanticRecall: {
@@ -5164,7 +5183,7 @@ const formatContentTool = createTool({
   }
 });
 
-const logger$m = createLogger({ name: "document-tools", level: process.env.LOG_LEVEL === "debug" ? "debug" : "info" });
+const logger$n = createLogger({ name: "document-tools", level: process.env.LOG_LEVEL === "debug" ? "debug" : "info" });
 const documentRepository = [
   {
     id: "1",
@@ -5305,19 +5324,19 @@ const extractHtmlTextTool = createTool({
     try {
       let html = context.html;
       if (!html && context.url) {
-        logger$m.info(`Fetching HTML from URL: ${context.url}`);
+        logger$n.info(`Fetching HTML from URL: ${context.url}`);
         const response = await fetch(context.url);
         if (!response.ok) throw new Error(`Failed to fetch URL: ${response.statusText}`);
         html = await response.text();
       }
       if (!html) throw new Error("No HTML content provided or fetched.");
-      logger$m.info("Extracting text from HTML using cheerio");
+      logger$n.info("Extracting text from HTML using cheerio");
       const $ = cheerio.load(html);
       const text = $("body").text();
       recordMetrics(span, { status: "success" });
       return { text };
     } catch (error) {
-      logger$m.error(`extractHtmlTextTool error: ${error instanceof Error ? error.message : String(error)}`);
+      logger$n.error(`extractHtmlTextTool error: ${error instanceof Error ? error.message : String(error)}`);
       recordMetrics(span, { status: "error", errorMessage: error instanceof Error ? error.message : String(error) });
       throw error;
     } finally {
@@ -6618,7 +6637,7 @@ const github = new GithubIntegration({
   }
 });
 
-const logger$l = createLogger({ name: "evals", level: "info" });
+const logger$m = createLogger({ name: "evals", level: "info" });
 function getEvalModelId() {
   return process.env.EVAL_MODEL_ID || "models/gemini-2.0-flashlite";
 }
@@ -7084,12 +7103,12 @@ const faithfulnessEvalTool = createTool({
       const explanation = `Matched ${matched} of ${facts.length} reference facts.`;
       signoz.recordMetrics(span, { latencyMs: performance.now() - startTime, status: "success" });
       span.end();
-      logger$l.info("Faithfulness eval result", { score, explanation, response: context.response });
+      logger$m.info("Faithfulness eval result", { score, explanation, response: context.response });
       return { score, explanation, success: true };
     } catch (error) {
       signoz.recordMetrics(span, { latencyMs: performance.now() - startTime, status: "error", errorMessage: error instanceof Error ? error.message : String(error) });
       span.end();
-      logger$l.error("Faithfulness eval error", { error });
+      logger$m.error("Faithfulness eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -7127,12 +7146,12 @@ const biasEvalTool = createTool({
       const found = biasKeywords.filter((k) => lower.includes(k));
       const score = found.length > 0 ? Math.min(1, found.length * 0.3) : 0;
       const explanation = found.length > 0 ? `Detected possible bias: ${found.join(", ")}` : "No obvious bias detected.";
-      logger$l.info("Bias eval result", { score, explanation, response: context.response });
+      logger$m.info("Bias eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$l.error("Bias eval error", { error });
+      logger$m.error("Bias eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -7171,12 +7190,12 @@ const toxicityEvalTool = createTool({
       const found = toxicKeywords.filter((k) => lower.includes(k));
       const score = found.length > 0 ? Math.min(1, found.length * 0.2) : 0;
       const explanation = found.length > 0 ? `Detected possible toxicity: ${found.join(", ")}` : "No obvious toxicity detected.";
-      logger$l.info("Toxicity eval result", { score, explanation, response: context.response });
+      logger$m.info("Toxicity eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$l.error("Toxicity eval error", { error });
+      logger$m.error("Toxicity eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -7208,12 +7227,12 @@ const hallucinationEvalTool = createTool({
       }
       const score = sentences.length > 0 ? hallucinated / sentences.length : 0;
       const explanation = hallucinated > 0 ? `${hallucinated} of ${sentences.length} sentences may be hallucinated.` : "No obvious hallucinations detected.";
-      logger$l.info("Hallucination eval result", { score, explanation, response: context.response });
+      logger$m.info("Hallucination eval result", { score, explanation, response: context.response });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$l.error("Hallucination eval error", { error });
+      logger$m.error("Hallucination eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -7241,12 +7260,12 @@ const summarizationEvalTool = createTool({
       const brevity = 1 - Math.min(1, context.summary.length / (context.reference.length || 1));
       const score = Math.max(0, Math.min(1, coverage * 0.7 + brevity * 0.3));
       const explanation = `Coverage: ${(coverage * 100).toFixed(0)}%, Brevity: ${(brevity * 100).toFixed(0)}%`;
-      logger$l.info("Summarization eval result", { score, explanation, summary: context.summary });
+      logger$m.info("Summarization eval result", { score, explanation, summary: context.summary });
       span.end();
       return { score, explanation, success: true };
     } catch (error) {
       span.end();
-      logger$l.error("Summarization eval error", { error });
+      logger$m.error("Summarization eval error", { error });
       return { score: 0, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -7870,6 +7889,359 @@ function createMastraRedditTools() {
   return mastraTools;
 }
 
+const logger$l = createLogger({ name: "puppeteer", level: "debug" });
+logger$l.info("Initializing Puppeteer tool for web navigation and screenshotting.");
+const SCREENSHOT_DIR = path.resolve(process.cwd(), "puppeteer_screenshots");
+function generateScreenshotFilename(url) {
+  const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+  const urlHash = crypto.createHash("md5").update(url).digest("hex").substring(0, 8);
+  return `screenshot_${urlHash}_${timestamp}.png`;
+}
+const ClickActionSchema = z.object({
+  type: z.literal("click"),
+  selector: z.string().describe("CSS selector for the element to click."),
+  waitForNavigation: z.boolean().optional().default(false).describe("Wait for navigation to complete after the click.")
+});
+const TypeActionSchema = z.object({
+  type: z.literal("type"),
+  selector: z.string().describe("CSS selector for the input field."),
+  text: z.string().describe("Text to type into the field."),
+  delay: z.number().optional().default(50).describe("Delay between keystrokes in milliseconds.")
+});
+const ScrapeActionSchema = z.object({
+  type: z.literal("scrape"),
+  selector: z.string().describe("CSS selector for the element(s) to scrape."),
+  attribute: z.string().optional().describe("Optional attribute to extract (e.g., 'href', 'src'). If omitted, extracts text content."),
+  multiple: z.boolean().optional().default(false).describe("Whether to scrape multiple matching elements.")
+});
+const WaitForSelectorActionSchema = z.object({
+  type: z.literal("waitForSelector"),
+  selector: z.string().describe("CSS selector to wait for."),
+  timeout: z.number().optional().default(3e4).describe("Maximum time to wait in milliseconds.")
+});
+const ScrollActionSchema = z.object({
+  type: z.literal("scroll"),
+  direction: z.enum(["down", "up", "bottom", "top"]).describe("Direction to scroll."),
+  amount: z.number().optional().describe("Pixel amount to scroll (for 'down'/'up'). Defaults to window height/width."),
+  selector: z.string().optional().describe("Optional selector to scroll within or to.")
+  // Scroll within an element or scroll element into view
+});
+const HoverActionSchema = z.object({
+  type: z.literal("hover"),
+  selector: z.string().describe("CSS selector for the element to hover over.")
+});
+const SelectActionSchema = z.object({
+  type: z.literal("select"),
+  selector: z.string().describe("CSS selector for the <select> element."),
+  value: z.string().describe("The value of the <option> to select.")
+});
+const WaitActionSchema = z.object({
+  type: z.literal("wait"),
+  duration: z.number().int().min(1).describe("Duration to wait in milliseconds.")
+});
+const EvaluateActionSchema = z.object({
+  type: z.literal("evaluate"),
+  script: z.string().describe("JavaScript code to execute in the page context. Use 'return' to output data.")
+});
+const ActionSchema = z.discriminatedUnion("type", [
+  ClickActionSchema,
+  TypeActionSchema,
+  ScrapeActionSchema,
+  WaitForSelectorActionSchema,
+  ScrollActionSchema,
+  HoverActionSchema,
+  SelectActionSchema,
+  WaitActionSchema,
+  EvaluateActionSchema
+]);
+const PuppeteerOutputSchema = z.object({
+  url: z.string().url().describe("The final URL after navigation and actions."),
+  pageTitle: z.string().optional().describe("The title of the web page after actions."),
+  scrapedData: z.array(z.any()).optional().describe("Data scraped or returned by evaluate actions."),
+  screenshotPath: z.string().optional().describe("Absolute path to the saved screenshot file, if taken."),
+  // --- Updated fields for knowledge save status ---
+  knowledgeSavePath: z.string().optional().describe("Full path where scraped data was saved in the knowledge base, if requested."),
+  // Renamed
+  saveSuccess: z.boolean().optional().describe("Indicates if saving scraped data to knowledge base was successful."),
+  saveError: z.string().optional().describe("Error message if saving scraped data to knowledge base failed."),
+  // --- End updated fields ---
+  success: z.boolean().describe("Whether the overall operation was successful."),
+  error: z.string().optional().describe("Error message if the operation failed.")
+});
+const PuppeteerInputSchema = z.object({
+  url: z.string().url().describe("The initial URL of the web page to navigate to."),
+  screenshot: z.boolean().optional().default(false).describe("Whether to take a full-page screenshot at the end."),
+  initialWaitForSelector: z.string().optional().describe("A CSS selector to wait for after initial navigation."),
+  actions: z.array(ActionSchema).optional().describe("A sequence of actions to perform on the page."),
+  // --- Fields for saving to knowledge base ---
+  saveKnowledgeFilename: z.string().optional().describe("Optional filename (e.g., 'scraped_results.json') to save scraped data within the knowledge base."),
+  saveFormat: z.enum(["json", "csv"]).optional().default("json").describe("Format to save the scraped data (default: json)."),
+  saveMode: z.nativeEnum(FileWriteMode).optional().default(FileWriteMode.OVERWRITE).describe("Write mode for saving data (overwrite, append, create-new)."),
+  saveEncoding: z.nativeEnum(FileEncoding).optional().default(FileEncoding.UTF8).describe("Encoding for saving data.")
+  // --- End fields ---
+});
+const puppeteerTool = createTool({
+  id: "puppeteer_web_automator",
+  description: "Navigates to a web page using Puppeteer, performs a sequence of actions (click, type, scrape, wait), optionally takes a screenshot, and returns page information and scraped data.",
+  inputSchema: PuppeteerInputSchema,
+  outputSchema: PuppeteerOutputSchema,
+  execute: async (executionContext) => {
+    const { context: input, container } = executionContext;
+    const span = createAISpan("puppeteer_tool_execution", {
+      "tool.id": "puppeteer_web_automator",
+      "input.url": input.url,
+      "input.actions_count": input.actions?.length ?? 0,
+      "input.screenshot_requested": input.screenshot ?? false,
+      "input.save_requested": !!input.saveKnowledgeFilename
+    });
+    let browser = null;
+    const output = {
+      url: input.url,
+      success: false,
+      scrapedData: []
+    };
+    const startTime = Date.now();
+    try {
+      logger$l.info(`Starting Puppeteer automation for URL: ${input.url}`);
+      span.addEvent("Automation started", { url: input.url });
+      if (input.screenshot) {
+        await fs__default.ensureDir(SCREENSHOT_DIR);
+        logger$l.debug(`Ensured screenshot directory exists: ${SCREENSHOT_DIR}`);
+      }
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"]
+      });
+      logger$l.debug("Puppeteer browser launched.");
+      const page = await browser.newPage();
+      logger$l.debug("New page created.");
+      await page.setViewport({ width: 1280, height: 800 });
+      logger$l.debug("Viewport set.");
+      logger$l.info(`Navigating to ${input.url}...`);
+      await page.goto(input.url, { waitUntil: "networkidle2", timeout: 6e4 });
+      output.url = page.url();
+      span.setAttribute("navigation.final_url", output.url);
+      logger$l.info(`Navigation complete. Current URL: ${output.url}`);
+      if (input.initialWaitForSelector) {
+        logger$l.info(`Waiting for initial selector: ${input.initialWaitForSelector}`);
+        await page.waitForSelector(input.initialWaitForSelector, { timeout: 3e4 });
+        logger$l.debug(`Initial selector found: ${input.initialWaitForSelector}`);
+      }
+      if (input.actions && input.actions.length > 0) {
+        logger$l.info(`Executing ${input.actions.length} actions...`);
+        span.addEvent("Executing actions", { count: input.actions.length });
+        for (const [index, action] of input.actions.entries()) {
+          logger$l.debug(`Executing action ${index + 1}: ${action.type}`);
+          try {
+            switch (action.type) {
+              case "click":
+                logger$l.info(`Clicking element: ${action.selector}`);
+                const clickPromise = page.click(action.selector);
+                if (action.waitForNavigation) {
+                  logger$l.debug("Waiting for navigation after click...");
+                  await Promise.all([clickPromise, page.waitForNavigation({ waitUntil: "networkidle2", timeout: 6e4 })]);
+                  output.url = page.url();
+                  logger$l.info(`Navigation after click complete. New URL: ${output.url}`);
+                } else {
+                  await clickPromise;
+                }
+                logger$l.debug(`Clicked element: ${action.selector}`);
+                break;
+              case "type":
+                logger$l.info(`Typing into element: ${action.selector}`);
+                await page.type(action.selector, action.text, { delay: action.delay });
+                logger$l.debug(`Typed text into: ${action.selector}`);
+                break;
+              case "scrape":
+                logger$l.info(`Scraping element(s): ${action.selector}` + (action.attribute ? ` [Attribute: ${action.attribute}]` : " [Text Content]"));
+                let scrapedItems = [];
+                if (action.multiple) {
+                  scrapedItems = await page.$$eval(
+                    action.selector,
+                    (elements, attr) => elements.map((el) => attr ? el.getAttribute(attr) : el.textContent?.trim() ?? null),
+                    action.attribute
+                  );
+                } else {
+                  const scrapedItem = await page.$eval(
+                    action.selector,
+                    (element, attr) => attr ? element.getAttribute(attr) : element.textContent?.trim() ?? null,
+                    action.attribute
+                  ).catch(() => null);
+                  if (scrapedItem !== null) {
+                    scrapedItems = [scrapedItem];
+                  }
+                }
+                output.scrapedData = [...output.scrapedData ?? [], ...scrapedItems];
+                logger$l.debug(`Scraped ${scrapedItems.length} items. Total scraped: ${output.scrapedData?.length}`);
+                break;
+              case "waitForSelector":
+                logger$l.info(`Waiting for selector: ${action.selector} (Timeout: ${action.timeout}ms)`);
+                await page.waitForSelector(action.selector, { timeout: action.timeout });
+                logger$l.debug(`Selector found: ${action.selector}`);
+                break;
+              case "scroll":
+                logger$l.info(`Scrolling ${action.direction}` + (action.selector ? ` within/to ${action.selector}` : " window"));
+                await page.evaluate(async (options) => {
+                  const element = options.selector ? document.querySelector(options.selector) : window;
+                  if (!element) throw new Error(`Scroll target not found: ${options.selector}`);
+                  const scrollAmount = options.amount ?? (options.direction === "down" || options.direction === "up" ? window.innerHeight : window.innerWidth);
+                  const target = options.selector && element !== window ? element : document.scrollingElement || document.documentElement;
+                  switch (options.direction) {
+                    case "down":
+                      target.scrollTop += scrollAmount;
+                      break;
+                    case "up":
+                      target.scrollTop -= scrollAmount;
+                      break;
+                    case "bottom":
+                      if (options.selector && element instanceof Element) {
+                        element.scrollTop = element.scrollHeight;
+                      } else {
+                        target.scrollTop = target.scrollHeight;
+                      }
+                      break;
+                    case "top":
+                      if (options.selector && element instanceof Element) {
+                        element.scrollTop = 0;
+                      } else {
+                        target.scrollTop = 0;
+                      }
+                      break;
+                  }
+                  await new Promise((resolve) => setTimeout(resolve, 100));
+                }, action);
+                logger$l.debug(`Scrolled ${action.direction}.`);
+                break;
+              case "hover":
+                logger$l.info(`Hovering over element: ${action.selector}`);
+                await page.hover(action.selector);
+                logger$l.debug(`Hovered over: ${action.selector}`);
+                break;
+              case "select":
+                logger$l.info(`Selecting option [value=${action.value}] in dropdown: ${action.selector}`);
+                await page.select(action.selector, action.value);
+                logger$l.debug(`Selected option in: ${action.selector}`);
+                break;
+              case "wait":
+                logger$l.info(`Waiting for ${action.duration}ms`);
+                await new Promise((resolve) => setTimeout(resolve, action.duration));
+                logger$l.debug("Wait complete.");
+                break;
+              case "evaluate":
+                logger$l.info(`Evaluating script...`);
+                const result = await page.evaluate(action.script);
+                if (result !== void 0) {
+                  output.scrapedData = [...output.scrapedData ?? [], result];
+                  logger$l.debug(`Script evaluated. Result added to scrapedData. Total scraped: ${output.scrapedData?.length}`);
+                } else {
+                  logger$l.debug(`Script evaluated. No return value.`);
+                }
+                break;
+              default:
+                const _exhaustiveCheck = action;
+                logger$l.error("Unsupported action type encountered", { action: _exhaustiveCheck });
+                throw new Error(`Unsupported action type encountered: ${JSON.stringify(_exhaustiveCheck)}`);
+            }
+          } catch (actionError) {
+            const errorMsg = `Error during action ${index + 1} (${action.type}): ${actionError.message}`;
+            logger$l.error(errorMsg, actionError);
+            throw new Error(errorMsg);
+          }
+        }
+        logger$l.info("All actions executed.");
+        span.addEvent("Actions completed");
+      }
+      output.pageTitle = await page.title();
+      logger$l.debug(`Final page title: ${output.pageTitle}`);
+      if (input.screenshot) {
+        const filename = generateScreenshotFilename(output.url);
+        const screenshotPath = path.join(SCREENSHOT_DIR, filename);
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        output.screenshotPath = screenshotPath;
+      }
+      if (input.saveKnowledgeFilename && output.scrapedData && output.scrapedData.length > 0) {
+        span.addEvent("Saving scraped data", { filename: input.saveKnowledgeFilename, count: output.scrapedData.length });
+        let contentToSave = "";
+        try {
+          if (input.saveFormat === "json") {
+            contentToSave = JSON.stringify(output.scrapedData, null, 2);
+          } else if (input.saveFormat === "csv") {
+            if (output.scrapedData.every((item) => typeof item === "object" && item !== null)) {
+              const headers = Object.keys(output.scrapedData[0]).join(",");
+              const rows = output.scrapedData.map(
+                (item) => Object.values(item).map((val) => JSON.stringify(val)).join(",")
+              );
+              contentToSave = `${headers}
+${rows.join("\n")}`;
+            } else {
+              throw new Error("CSV format requires scraped data to be an array of objects.");
+            }
+          } else {
+            throw new Error(`Unsupported save format: ${input.saveFormat}`);
+          }
+          if (!writeKnowledgeFileTool?.execute) {
+            throw new Error("writeKnowledgeFileTool.execute is not defined or tool not imported correctly.");
+          }
+          const writeResult = await writeKnowledgeFileTool.execute({
+            context: {
+              path: input.saveKnowledgeFilename,
+              content: contentToSave,
+              mode: input.saveMode,
+              encoding: input.saveEncoding,
+              createDirectory: true
+            },
+            container
+          });
+          if (writeResult.success) {
+            span.setAttribute("output.save_path", writeResult.metadata.path);
+            span.addEvent("Save successful");
+            output.knowledgeSavePath = writeResult.metadata.path;
+            output.saveSuccess = true;
+            logger$l.info(`Successfully saved scraped data to knowledge base: ${output.knowledgeSavePath}`);
+          } else {
+            span.addEvent("Save failed", { error: output.saveError });
+            output.saveSuccess = false;
+            output.saveError = writeResult.error || "Unknown error saving to knowledge base.";
+            logger$l.error(`Failed to save scraped data to knowledge base: ${output.saveError}`);
+          }
+        } catch (saveError) {
+          output.saveSuccess = false;
+          output.saveError = saveError instanceof Error ? saveError.message : String(saveError);
+          logger$l.error(`Error preparing or saving scraped data to knowledge base: ${output.saveError}`);
+        }
+      } else if (input.saveKnowledgeFilename) {
+        logger$l.warn(`Knowledge base filename provided (${input.saveKnowledgeFilename}), but no scraped data to save.`);
+      }
+      output.success = true;
+      logger$l.info("Puppeteer automation completed successfully.");
+      span.setAttribute("output.scraped_count", output.scrapedData?.length ?? 0);
+      recordMetrics(span, {
+        status: "success",
+        latencyMs: Date.now() - startTime
+        // 'output.scraped_count' is now a span attribute, not a metric
+      });
+    } catch (error) {
+      logger$l.error(`Puppeteer tool error: ${error.message}`, error);
+      output.error = error instanceof Error ? error.message : String(error);
+      output.success = false;
+      recordMetrics(span, {
+        status: "error",
+        errorMessage: output.error,
+        latencyMs: Date.now() - startTime
+      });
+      span.recordException(error);
+    } finally {
+      if (browser) {
+        await browser.close();
+        logger$l.info("Browser closed.");
+        span.addEvent("Browser closed");
+      }
+      span.end();
+    }
+    return output;
+  }
+});
+
 const logger$k = createLogger({ name: "tool-initialization", level: "info" });
 const envSchema = z.object({
   GOOGLE_AI_API_KEY: z.string().min(1, "Google AI API key is required"),
@@ -8122,6 +8494,7 @@ try {
 }
 extraTools.push(ensureToolOutputSchema(getMainBranchRef));
 extraTools.push(...tracingTools);
+extraTools.push(ensureToolOutputSchema(puppeteerTool));
 const optionalTools = Object.values(
   searchTools
 ).filter(
