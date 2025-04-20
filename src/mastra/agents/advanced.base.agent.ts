@@ -9,18 +9,19 @@ import {
   BaseAgentConfig,
   defaultErrorHandler,
   defaultResponseValidation,
-  ResponseHookOptions,
+  type ResponseHookOptions,
   createModelInstance
 } from "./config/index";
 import { Agent, createAgentFromConfig } from "./base.agent";
-import { allToolsMap } from "../tools";
-import { sharedMemory as defaultSharedMemory, sharedMemory } from "../database";
+import { allToolsMap } from "../tools/index"; // Ensure allToolsMap is exported from tools/index.ts
+import { sharedMemory as defaultSharedMemory, sharedMemory } from "../database/index";
 import { createLogger } from "@mastra/core/logger";
+import { initSigNoz } from "../services/signoz";
+import { initializeDefaultTracing } from "../services/tracing";
 import { createAISpan, recordMetrics } from "../services/signoz";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { z, ZodSchema } from "zod";
-import { JSONSchema7 } from "json-schema";
-import { Tool } from "@mastra/core/tools";
+import { z } from "zod";
+import { Tool } from "@mastra/core";
 import type { CoreMessage, Message } from "ai";
 import { generateText, generateObject } from "ai";
 import type { StreamResult, StreamOptions, AgentResponse } from "../types";
@@ -28,7 +29,7 @@ import {
   createResponseHook,
   createStreamHooks,
   createToolHooks
-} from "../hooks/advanced";
+} from "../hooks/index";
 
 /**
  * Context object for middleware
@@ -95,6 +96,70 @@ const runMiddleware = async (middleware: Middleware[], context: MiddlewareContex
  * @param maxRetries - Maximum number of retry attempts
  * @returns An advanced agent instance
  */
+import { loadAgentConfigFromFileAsync } from './configLoader';
+import { parseInput, SupportedFormat } from './format.utils';
+
+// ─── Initialize OpenTelemetry + SigNoz before any agent logic ─────────────────
+initializeDefaultTracing();
+const { tracer: signozTracer, meterProvider } = initSigNoz({
+  serviceName: "advanced-agent-initialization",
+  export: {
+    type: "otlp",
+    endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+    headers: {},
+    metricsInterval: 60000,
+  },
+});
+
+/**
+ * Loads an agent config from a file (JSON, YAML, or XML) and creates an advanced agent.
+ * @param filePath Path to the config file
+ * @param format Format of the config file: 'json', 'yaml', or 'xml'
+ * @param options Optional advanced agent options
+ */
+/**
+ * Loads agent config from a file and memory from a SQLite db, then creates an advanced agent.
+ * @param configFile Path to agent config file
+ * @param configFormat Format of the config file: 'json', 'yaml', etc.
+ * @param dbFile Path to SQLite db file
+ * @param options Optional advanced agent options
+ */
+export async function createAgentWithSqliteMemory(
+  configFile: string,
+  configFormat: SupportedFormat,
+  dbFile: string,
+  options?: Parameters<typeof createAdvancedAgent>[1]
+) {
+  const config = await loadAgentConfigFromFileAsync(configFile, configFormat);
+  const sqliteMemory = parseInput(dbFile, 'db');
+  return createAdvancedAgent(
+    { ...config, initialMemory: sqliteMemory },
+    options
+  );
+}
+
+export async function createAdvancedAgentFromFile(
+  filePath: string,
+  format: SupportedFormat,
+  options?: Parameters<typeof createAdvancedAgent>[1]
+) {
+  const config = await loadAgentConfigFromFileAsync(filePath, format);
+  return createAdvancedAgent(config, options);
+}
+
+
+// create metric instruments
+const agentMeter = meterProvider?.getMeter
+  ? meterProvider.getMeter("advanced-agent-metrics")
+  : undefined;
+
+const agentCreationCounter = agentMeter?.createCounter("advanced.agent.creation.count", {
+  description: "Number of advanced agents created",
+});
+const agentCreationLatency = agentMeter?.createHistogram("advanced.agent.creation.latency_ms", {
+  description: "Time taken to create an advanced agent",
+});
+
 export const createAdvancedAgent = (
   config: BaseAgentConfig,
   options: AdvancedAgentOptions = {},
@@ -107,6 +172,12 @@ export const createAdvancedAgent = (
 ): AdvancedAgentType => {
   const agentLogger = createLogger({ name: config.name || "AdvancedAgent" });
   const enableTracing = options.enableTracing ?? true;
+
+  // --- Tracing and metrics ---
+  const start = Date.now();
+  const span = signozTracer?.startSpan("advanced.agent.create", {
+    attributes: { agent_id: config.id },
+  });
 
   // Initialize hooks
   const streamHooks = createStreamHooks(enableTracing);
@@ -146,12 +217,34 @@ export const createAdvancedAgent = (
     ? createResponseHook(responseValidationOptions)
     : undefined;
 
+  // Create model instance using config.modelConfig (like base.agent.ts)
+  const model = createModelInstance(config.modelConfig);
+
   // Create the base agent using createAgentFromConfig from base.agent.ts
-  const baseAgent = createAgentFromConfig({
-    config,
-    memory,
-    onError: undefined // We'll handle errors in the wrapper
-  });
+  let baseAgent: Agent;
+  try {
+    baseAgent = createAgentFromConfig({
+      config: {
+        ...config,
+        modelConfig: config.modelConfig,
+        responseValidation: config.responseValidation,
+        // All other config fields are spread
+      },
+      memory,
+      onError,
+    });
+  } catch (error) {
+    span?.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+    span?.end();
+    throw error;
+  }
+
+  span?.setStatus({ code: SpanStatusCode.OK });
+  span?.end();
+
+  // record metrics
+  agentCreationCounter?.add(1, { agent_id: config.id });
+  agentCreationLatency?.record(Date.now() - start, { agent_id: config.id });
 
   // Prepare advanced agent wrapper
   const advancedAgentBase = baseAgent as unknown as Omit<Agent, "generate" | "stream"> & {
@@ -162,6 +255,7 @@ export const createAdvancedAgent = (
     originalGenerate: Agent["generate"];
     originalStream?: Agent["stream"];
   };
+
 
   // Initialize wrapper state & methods
   advancedAgentBase.state = {};
@@ -210,22 +304,54 @@ export const createAdvancedAgent = (
         agent: agent,
       };
 
+      // --- Zod validation for messages and args ---
+      const messageSchema = z.union([
+        z.string(),
+        z.array(z.string()),
+        z.array(z.any()), // fallback for CoreMessage[] | Message[]
+      ]);
+      const argsSchema = z.any(); // You can refine this to match your expected args structure
+
+      const parsedMessages = messageSchema.safeParse(messages);
+      if (!parsedMessages.success) {
+        throw new Error("Invalid messages format: " + parsedMessages.error.message);
+      }
+      if (args !== undefined) {
+        const parsedArgs = argsSchema.safeParse(args);
+        if (!parsedArgs.success) {
+          throw new Error("Invalid args format: " + parsedArgs.error.message);
+        }
+      }
+      // --- End zod validation for inputs ---
+
       try {
         await runMiddleware(preHooks, context);
         const result = await agent.originalGenerate(messages, args);
-        
+
+        // --- Zod validation for agent result ---
+        const agentResultSchema = z.object({
+          text: z.string().optional(),
+          object: z.unknown().optional(),
+          error: z.string().optional(),
+        }).passthrough();
+        const parsedResult = agentResultSchema.safeParse(result);
+        if (!parsedResult.success) {
+          throw new Error("Invalid agent result format: " + parsedResult.error.message);
+        }
+        // --- End zod validation for agent result ---
+
         // Call the advanced response hook
-        createResponseHook({ agent: agent.name, enableTracing })({ result });
-        
+        createResponseHook({ enableTracing })(result);
+
         context.result = result;
         await runMiddleware(postHooks, context);
-        
+
         recordMetrics(span, { status: "success" });
         span.setStatus({ code: SpanStatusCode.OK });
         span.addEvent("generate.success");
         agent.onEvent?.("success", { result, attempt: currentAttempt });
         span.end();
-        
+
         return result;
       } catch (err) {
         lastError = err as Error;

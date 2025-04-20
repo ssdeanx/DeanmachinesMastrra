@@ -8,7 +8,7 @@
 import { Agent } from "@mastra/core/agent";
 import { createAgentFromConfig } from "./base.agent";
 import {copywriterAgentConfig }from "./config";
-import { createLogger } from "@mastra/core/logger";
+import { createLogger } from "@mastra/core";
 import { sharedMemory } from "../database";
 
 // Configure logger for the copywriter agent

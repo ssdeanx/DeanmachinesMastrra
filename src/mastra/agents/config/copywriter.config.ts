@@ -178,45 +178,45 @@ export const copywriterAgentConfig: BaseAgentConfig = {
 /**
  * Schema for structured copywriter agent responses
  */
-export const copywriterResponseSchema = z.object({
-  content: z.string().describe("The generated marketing copy or content"),
-  targetAudience: z.string().describe("The intended audience for this content"),
-  channelType: z
-    .string()
-    .describe("The marketing channel this content is optimized for"),
-  toneAndVoice: z.string().describe("Description of the tone and voice used"),
-  keyMessages: z
-    .array(z.string())
-    .describe("Primary messages conveyed in the content"),
-  callToAction: z
-    .string()
-    .optional()
-    .describe("The specific call to action, if applicable"),
-  brandGuidelines: z
-    .object({
-      followed: z
-        .array(z.string())
-        .describe("Brand guidelines that were followed"),
-      exceptions: z
-        .array(z.string())
-        .optional()
-        .describe("Any exceptions made to brand guidelines"),
-    })
-    .optional()
-    .describe("How the content aligns with brand guidelines"),
-  sentimentAnalysis: z
-    .object({
-      overall: z.string().describe("Overall sentiment of the content"),
-      score: z
-        .number()
-        .min(-1)
-        .max(1)
-        .optional()
-        .describe("Sentiment score (-1 to 1)"),
-    })
-    .optional()
-    .describe("Analysis of content sentiment"),
-});
+export const copywriterResponseSchema = z
+  .object({
+    content: z.string().optional().describe("The generated marketing copy or content"),
+    targetAudience: z.string().optional().describe("The intended audience for this content"),
+    channelType: z
+      .string().optional()
+      .describe("The marketing channel this content is optimized for"),
+    toneAndVoice: z.string().optional().describe("Description of the tone and voice used"),
+    keyMessages: z
+      .array(z.string()).optional()
+      .describe("Primary messages conveyed in the content"),
+    callToAction: z
+      .string()
+      .optional()
+      .describe("The specific call to action, if applicable"),
+    brandGuidelines: z
+      .object({
+        followed: z
+          .array(z.string()).optional()
+          .describe("Brand guidelines that were followed"),
+        exceptions: z
+          .array(z.string()).optional()
+          .describe("Any exceptions made to brand guidelines"),
+      }).passthrough()
+      .optional()
+      .describe("How the content aligns with brand guidelines"),
+    sentimentAnalysis: z
+      .object({
+        overall: z.string().optional().describe("Overall sentiment of the content"),
+        score: z
+          .number()
+          .min(-1)
+          .max(1)
+          .optional()
+          .describe("Sentiment score (-1 to 1)"),
+      }).passthrough()
+      .optional()
+      .describe("Analysis of content sentiment"),
+  }).passthrough();
 
 /**
  * Type for structured responses from the Copywriter agent

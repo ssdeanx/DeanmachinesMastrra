@@ -4,12 +4,11 @@ import { TABLE_EVALS } from '@mastra/core/storage';
 import { checkEvalStorageFields } from '@mastra/core/utils';
 import { Mastra, isVercelTool } from '@mastra/core';
 import { createLogger } from '@mastra/core/logger';
-import { Agent } from '@mastra/core/agent';
-import { UpstashTransport } from '@mastra/loggers/upstash';
-import * as fs from 'fs-extra';
-import fs__default, { ensureDirSync, ensureFileSync } from 'fs-extra';
-import path, { resolve, extname, dirname, join } from 'path';
-import { FileTransport } from '@mastra/loggers/file';
+import { z, ZodType, ZodFirstPartyTypeKind, ZodOptional } from 'zod';
+import { Langfuse } from 'langfuse';
+import process$1, { env } from 'process';
+import { Client } from 'langsmith';
+import { v4 } from 'uuid';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-proto';
@@ -19,18 +18,21 @@ import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentation
 import { SemanticResourceAttributes, SemanticAttributes } from '@opentelemetry/semantic-conventions';
 import * as api from '@opentelemetry/api';
 import { propagation, trace, metrics, context, SpanStatusCode as SpanStatusCode$1 } from '@opentelemetry/api';
-import process$1, { env } from 'process';
 import { resourceFromAttributes, detectResources } from '@opentelemetry/resources';
 import { CompositePropagator } from '@opentelemetry/core';
 import { B3Propagator } from '@opentelemetry/propagator-b3';
 import { ParentBasedSampler, TraceIdRatioBasedSampler } from '@opentelemetry/sdk-trace-base';
-import { z, ZodType, ZodFirstPartyTypeKind, ZodOptional } from 'zod';
-import { Langfuse } from 'langfuse';
+import { Agent } from '@mastra/core/agent';
+import { UpstashTransport } from '@mastra/loggers/upstash';
+import * as fs from 'fs-extra';
+import fs__default, { ensureDirSync, ensureFileSync } from 'fs-extra';
+import path, { resolve, extname, dirname, join } from 'path';
+import { FileTransport } from '@mastra/loggers/file';
 import { createTool } from '@mastra/core/tools';
 import { google } from '@ai-sdk/google';
 import { encodingForModel } from 'js-tiktoken';
 import { createVectorQueryTool } from '@mastra/rag';
-import { GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI } from '@langchain/google-genai';
+import { ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings } from '@langchain/google-genai';
 import { AsyncCaller } from '@langchain/core/utils/async_caller';
 import { BraveSearchClient } from '@agentic/brave-search';
 import { GoogleCustomSearchClient } from '@agentic/google-custom-search';
@@ -38,8 +40,6 @@ import { TavilyClient } from '@agentic/tavily';
 import { aiFunction, AIFunctionsProvider, AIFunctionSet, asZodOrJsonSchema, sanitizeSearchParams, pruneEmpty, assert, getEnv, throttleKy, createAIFunction } from '@agentic/core';
 import { createMastraTools } from '@agentic/mastra';
 import Exa from 'exa-js';
-import { Client } from 'langsmith';
-import { v4 } from 'uuid';
 import { LibSQLStore } from '@mastra/core/storage/libsql';
 import { Memory } from '@mastra/memory';
 import crypto, { randomUUID } from 'crypto';
@@ -77,6 +77,592 @@ import { createServer } from 'http';
 import { Http2ServerRequest } from 'http2';
 import { Readable } from 'stream';
 import { createReadStream, lstatSync } from 'fs';
+
+const { SpanStatusCode } = api;
+const OTelAttributeNames = {
+  PROMPT_TOKENS: "ai.prompt.tokens",
+  TOTAL_TOKENS: "ai.tokens.total",
+  LATENCY_MS: "ai.latency.ms"};
+
+let langsmithClient = null;
+function configureLangSmithTracing(config) {
+  if (config?.enabled === false) {
+    return null;
+  }
+  if (langsmithClient) {
+    return langsmithClient;
+  }
+  try {
+    const apiKey = config?.apiKey || env.LANGSMITH_API_KEY;
+    const endpoint = config?.endpoint || env.LANGSMITH_ENDPOINT;
+    if (!apiKey) {
+      console.warn("LangSmith API key not provided, tracing disabled");
+      return null;
+    }
+    process.env.LANGCHAIN_TRACING_V2 = env.LANGSMITH_TRACING_V2 || "true";
+    process.env.LANGCHAIN_ENDPOINT = endpoint || "https://api.smith.langchain.com";
+    process.env.LANGCHAIN_API_KEY = apiKey;
+    process.env.LANGCHAIN_PROJECT = config?.projectName || "DeanmachinesAI";
+    langsmithClient = new Client({
+      apiKey,
+      apiUrl: endpoint || "https://api.smith.langchain.com"
+    });
+    console.log("LangSmith tracing configured successfully");
+    return langsmithClient;
+  } catch (error) {
+    console.error("Failed to configure LangSmith tracing:", error);
+    return null;
+  }
+}
+async function createLangSmithRun(name, tags) {
+  if (!langsmithClient) {
+    configureLangSmithTracing();
+  }
+  if (!langsmithClient) {
+    return Promise.resolve(v4());
+  }
+  const runId = v4();
+  try {
+    await langsmithClient.createRun({
+      id: runId,
+      // Pass the generated UUID as the run ID if supported
+      name,
+      run_type: "tool",
+      inputs: {},
+      // Add required inputs property
+      extra: {
+        tags: tags || [],
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    });
+    return runId;
+  } catch (error) {
+    console.error("Error creating LangSmith run:", error);
+    return v4();
+  }
+}
+async function trackFeedback(runId, feedback) {
+  if (!langsmithClient) {
+    configureLangSmithTracing();
+  }
+  if (!langsmithClient) {
+    console.warn("LangSmith client not available, feedback not tracked");
+    return false;
+  }
+  try {
+    const feedbackKey = feedback.key || "accuracy";
+    await langsmithClient.createFeedback(runId, feedbackKey, {
+      score: feedback.score,
+      comment: feedback.comment,
+      value: feedback.value
+    });
+    return true;
+  } catch (error) {
+    console.error("Error tracking feedback in LangSmith:", error);
+    return false;
+  }
+}
+configureLangSmithTracing();
+
+function createLangChainModel(config = {}) {
+  if (config.enableTracing !== false) {
+    configureLangSmithTracing();
+  }
+  const callbacks = config.callbacks || [];
+  switch (config.provider || "google") {
+    case "openai":
+      if (!env.OPENAI_API_KEY) {
+        throw new Error("OpenAI API key is required");
+      }
+      return new ChatOpenAI({
+        modelName: config.modelName || "gpt-4",
+        temperature: config.temperature || 0.7,
+        maxTokens: config.maxTokens,
+        callbacks
+      });
+    case "anthropic":
+      if (!env.ANTHROPIC_API_KEY) {
+        throw new Error("Anthropic API key is required");
+      }
+      return new ChatAnthropic({
+        modelName: config.modelName || "claude-3-sonnet-20240229",
+        temperature: config.temperature || 0.7,
+        maxTokens: config.maxTokens,
+        anthropicApiKey: env.ANTHROPIC_API_KEY,
+        callbacks
+      });
+    case "google":
+    default:
+      if (!env.GOOGLE_GENERATIVE_AI_API_KEY) {
+        throw new Error("Google AI API key is required");
+      }
+      return new ChatGoogleGenerativeAI({
+        model: config.modelName || env.MODEL || "models/gemini-2.0-flash",
+        apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY,
+        temperature: config.temperature || 0.7,
+        maxOutputTokens: config.maxTokens,
+        callbacks
+      });
+  }
+}
+
+const logger$t = createLogger({ name: "langfuse-service", level: "info" });
+const envSchema$2 = z.object({
+  LANGFUSE_PUBLIC_KEY: z.string().min(1, "Langfuse public key is required"),
+  LANGFUSE_SECRET_KEY: z.string().min(1, "Langfuse secret key is required"),
+  LANGFUSE_HOST: z.string().url().optional().default("https://cloud.langfuse.com")
+});
+function validateEnv() {
+  try {
+    return envSchema$2.parse(env);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const missingKeys = error.errors.filter((e) => e.code === "invalid_type" && e.received === "undefined").map((e) => e.path.join("."));
+      if (missingKeys.length > 0) {
+        logger$t.error(
+          `Missing required environment variables: ${missingKeys.join(", ")}`
+        );
+      }
+    }
+    logger$t.error("Langfuse environment validation failed:", { error });
+    throw new Error(
+      `Langfuse service configuration error: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+const validatedEnv$1 = validateEnv();
+function createLangfuseClient() {
+  try {
+    return new Langfuse({
+      publicKey: validatedEnv$1.LANGFUSE_PUBLIC_KEY,
+      secretKey: validatedEnv$1.LANGFUSE_SECRET_KEY,
+      baseUrl: validatedEnv$1.LANGFUSE_HOST
+    });
+  } catch (error) {
+    logger$t.error("Failed to create Langfuse client:", { error });
+    throw new Error(
+      `Langfuse client creation failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+const langfuseClient = createLangfuseClient();
+class LangfuseService {
+  client;
+  constructor() {
+    this.client = langfuseClient;
+  }
+  /**
+   * Create a new trace to track a user session or request
+   *
+   * @param name - Name of the trace
+   * @param options - Additional options for the trace
+   * @returns Trace object
+   */
+  createTrace(name, options) {
+    try {
+      logger$t.debug("Creating Langfuse trace", { name, ...options });
+      return this.client.trace({ name, ...options });
+    } catch (error) {
+      logger$t.error("Error creating trace:", { error, name });
+      throw new Error(`Failed to create Langfuse trace: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  /**
+   * Log a span within a trace to measure a specific operation
+   *
+   * @param name - Name of the span
+   * @param options - Configuration options for the span
+   * @returns Span object
+   */
+  createSpan(name, options) {
+    try {
+      logger$t.debug("Creating Langfuse span", { name, ...options });
+      return this.client.span({ name, ...options });
+    } catch (error) {
+      logger$t.error("Error creating span:", { error, name });
+      throw new Error(`Failed to create Langfuse span: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  /**
+   * Log a generation event (e.g., LLM call)
+   *
+   * @param name - Name of the generation
+   * @param options - Configuration options for the generation
+   * @returns Generation object
+   */
+  logGeneration(name, options) {
+    try {
+      logger$t.debug("Logging Langfuse generation", { name, ...options });
+      return this.client.generation({ name, ...options });
+    } catch (error) {
+      logger$t.error("Error logging generation:", { error, name });
+      throw new Error(`Failed to log Langfuse generation: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  /**
+   * Score a trace, span, or generation for quality evaluation
+   *
+   * @param options - Configuration options for the score
+   * @returns Score object
+   * @throws {Error} If no target ID (traceId, spanId, or generationId) is provided
+   */
+  createScore(options) {
+    try {
+      logger$t.debug("Creating Langfuse score", options);
+      if (!options.traceId && !options.spanId && !options.generationId) {
+        throw new Error("At least one of traceId, spanId, or generationId must be provided");
+      }
+      return this.client.score(options);
+    } catch (error) {
+      logger$t.error("Error creating score:", { error, name: options.name });
+      throw new Error(`Failed to create Langfuse score: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  /**
+   * Flush all pending Langfuse events
+   *
+   * @returns Promise that resolves when all events have been flushed
+   */
+  async flush() {
+    try {
+      await this.client.flush();
+      logger$t.debug("Flushed Langfuse events");
+    } catch (error) {
+      logger$t.error("Error flushing Langfuse events:", { error });
+      throw new Error(`Failed to flush Langfuse events: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+const langfuse = new LangfuseService();
+
+const logger$s = createLogger({ name: "signoz-service", level: "info" });
+let sdk = null;
+let tracer = null;
+let meterProvider$1 = null;
+function initSigNoz(config = {}) {
+  const isEnabled = env.MASTRA_TELEMETRY_ENABLED?.toLowerCase() === "false" ? false : config.enabled !== false;
+  if (!isEnabled) {
+    logger$s.info("SigNoz tracing is disabled via config or MASTRA_TELEMETRY_ENABLED=false.");
+    return { tracer: null, meterProvider: null };
+  }
+  if (sdk) {
+    logger$s.warn("SigNoz tracing already initialized.");
+    return { tracer: getTracer(), meterProvider: getMeterProvider() };
+  }
+  try {
+    const serviceName = env.MASTRA_SERVICE_NAME || config.serviceName || "deanmachines-ai-mastra";
+    const tracesEndpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT || config.export?.endpoint || "http://localhost:4318/";
+    const metricsEndpoint = env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT || tracesEndpoint.replace("/v1/traces", "/v1/metrics");
+    const headers = config.export?.headers || {};
+    logger$s.info(`Initializing SigNoz telemetry for service: ${serviceName}`, {
+      tracesEndpoint,
+      metricsEndpoint,
+      env: env.NODE_ENV || "development"
+    });
+    const resource = resourceFromAttributes({
+      [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
+      [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: env.NODE_ENV || "development",
+      [SemanticResourceAttributes.SERVICE_VERSION]: env.npm_package_version,
+      [SemanticResourceAttributes.HOST_NAME]: env.HOSTNAME || env.COMPUTERNAME,
+      [SemanticResourceAttributes.OS_TYPE]: process.platform
+    });
+    logger$s.info(`Initializing SigNoz: traces\u2192${tracesEndpoint}, metrics\u2192${metricsEndpoint}`);
+    sdk = new NodeSDK({
+      resource,
+      traceExporter: new OTLPTraceExporter({ url: tracesEndpoint, headers }),
+      metricReader: new PeriodicExportingMetricReader({
+        exporter: new OTLPMetricExporter({ url: metricsEndpoint, headers }),
+        exportIntervalMillis: config.export?.metricsInterval ?? 6e4
+      }),
+      instrumentations: [getNodeAutoInstrumentations()],
+      ...env.NODE_ENV !== "production" && {
+        spanProcessor: new SimpleSpanProcessor(new ConsoleSpanExporter())
+      }
+    });
+    sdk.start();
+    logger$s.info("SigNoz NodeSDK started");
+    tracer = api.trace.getTracer(`${serviceName}-tracer`);
+    meterProvider$1 = api.metrics.getMeterProvider();
+    process.on("SIGTERM", () => {
+      shutdownSigNoz().then(() => logger$s.info("SigNoz shutdown complete on SIGTERM.")).catch((err) => logger$s.error("Error shutting down SigNoz on SIGTERM:", err)).finally(() => process.exit(0));
+    });
+    process.on("SIGINT", () => {
+      shutdownSigNoz().then(() => logger$s.info("SigNoz shutdown complete on SIGINT.")).catch((err) => logger$s.error("Error shutting down SigNoz on SIGINT:", err)).finally(() => process.exit(0));
+    });
+    return { tracer, meterProvider: meterProvider$1 };
+  } catch (error) {
+    logger$s.error("Failed to initialize SigNoz NodeSDK", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : void 0
+    });
+    sdk = null;
+    return { tracer: null, meterProvider: null };
+  }
+}
+function getTracer() {
+  if (!tracer) {
+    throw new Error("SigNoz tracing has not been initialized successfully. Call initSigNoz first.");
+  }
+  return tracer;
+}
+function getMeterProvider() {
+  if (!meterProvider$1) {
+    throw new Error("SigNoz metrics has not been initialized successfully. Call initSigNoz first.");
+  }
+  return meterProvider$1;
+}
+function createAISpan(name, attributes = {}, options = {}) {
+  try {
+    const currentTracer = getTracer();
+    return currentTracer.startSpan(name, {
+      attributes: {
+        "ai.operation": name,
+        ...attributes
+      },
+      ...options
+    });
+  } catch (error) {
+    logger$s.warn(`Failed to create span '${name}' - tracing likely not initialized.`, { error: error.message });
+    return api.trace.wrapSpanContext(api.INVALID_SPAN_CONTEXT);
+  }
+}
+function recordLlmMetrics(span, tokenInfo, latencyMs) {
+  if (!span || !span.isRecording()) return;
+  try {
+    if (tokenInfo?.promptTokens !== void 0) {
+      span.setAttribute(OTelAttributeNames.PROMPT_TOKENS, tokenInfo.promptTokens);
+    }
+    if (latencyMs !== void 0) {
+      span.setAttribute(OTelAttributeNames.LATENCY_MS, latencyMs);
+    }
+  } catch (error) {
+    logger$s.warn("Failed to record LLM metrics on span", { error: error.message });
+  }
+}
+function recordMetrics(span, metrics) {
+  if (!span || !span.isRecording()) return;
+  try {
+    const { status, errorMessage, latencyMs, tokens, ...extraAttributes } = metrics;
+    if (tokens !== void 0) {
+      span.setAttribute(OTelAttributeNames.TOTAL_TOKENS, tokens);
+    }
+    if (latencyMs !== void 0) {
+      span.setAttribute(OTelAttributeNames.LATENCY_MS, latencyMs);
+    }
+    for (const [key, value] of Object.entries(extraAttributes)) {
+      if (value !== void 0) {
+        span.setAttribute(key, value);
+      }
+    }
+    if (status === "error") {
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: errorMessage || "Operation failed"
+      });
+      if (errorMessage) {
+        span.recordException({ name: "OperationError", message: errorMessage });
+      }
+    } else {
+      span.setStatus({
+        code: SpanStatusCode.OK
+      });
+    }
+  } catch (error) {
+    logger$s.warn("Failed to record metrics on span", { error: error.message });
+  }
+}
+function createHttpSpan(method, url, options = {}) {
+  try {
+    const currentTracer = getTracer();
+    const { attributes = {}, ...spanOptions } = options;
+    const parsedUrl = new URL(url);
+    return currentTracer.startSpan(`HTTP ${method.toUpperCase()}`, {
+      kind: api.SpanKind.CLIENT,
+      attributes: {
+        [SemanticAttributes.HTTP_METHOD]: method.toUpperCase(),
+        [SemanticAttributes.HTTP_URL]: url,
+        [SemanticAttributes.NET_PEER_NAME]: parsedUrl.hostname,
+        [SemanticAttributes.NET_PEER_PORT]: parsedUrl.port || (parsedUrl.protocol === "https:" ? 443 : 80),
+        ...attributes
+      },
+      ...spanOptions
+    });
+  } catch (error) {
+    logger$s.warn(`Failed to create HTTP span for ${method} ${url}`, { error: error.message });
+    return api.trace.wrapSpanContext(api.INVALID_SPAN_CONTEXT);
+  }
+}
+async function shutdownSigNoz() {
+  if (sdk) {
+    try {
+      logger$s.info("Shutting down SigNoz NodeSDK...");
+      await sdk.shutdown();
+      logger$s.info("SigNoz NodeSDK shutdown complete.");
+      sdk = null;
+      tracer = null;
+      meterProvider$1 = null;
+    } catch (error) {
+      logger$s.error("Error shutting down SigNoz NodeSDK", { error });
+    }
+  } else {
+    logger$s.info("SigNoz NodeSDK not initialized or already shut down.");
+  }
+}
+var signoz = {
+  init: initSigNoz,
+  getTracer,
+  getMeterProvider,
+  createSpan: createAISpan,
+  createHttpSpan,
+  recordLlmMetrics,
+  recordMetrics,
+  shutdown: shutdownSigNoz
+};
+
+const logger$r = createLogger({ name: "opentelemetry-tracing", level: "info" });
+let tracerInstance = null;
+let meterProviderInstance = null;
+let meterInstance = null;
+function initializeDefaultTracing(serviceName = "mastra-service", serviceVersion = "1.0.0") {
+  initOpenTelemetry({
+    serviceName,
+    serviceVersion,
+    environment: process$1.env.NODE_ENV || "development",
+    enabled: process$1.env.OTEL_ENABLED !== "false",
+    endpoint: process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+    metricsEnabled: process$1.env.OTEL_METRICS_ENABLED !== "false",
+    metricsIntervalMs: parseInt(process$1.env.OTEL_METRICS_INTERVAL_MS || "60000", 10),
+    samplingRatio: parseFloat(process$1.env.OTEL_SAMPLING_RATIO || "1.0")
+  });
+  return {
+    tracer: tracerInstance,
+    meterProvider: meterProviderInstance,
+    meter: meterInstance
+  };
+}
+function initOpenTelemetry(options) {
+  const {
+    serviceName = "deanmachines-ai",
+    serviceVersion = "1.0.0",
+    environment = "development",
+    enabled = true,
+    endpoint,
+    metricsEnabled = true,
+    metricsIntervalMs = 6e4,
+    samplingRatio = 1
+  } = options;
+  if (!enabled) {
+    logger$r.info("OpenTelemetry tracing is disabled");
+    tracerInstance = null;
+    meterProviderInstance = null;
+    meterInstance = null;
+    return null;
+  }
+  const detected = detectResources();
+  const manual = resourceFromAttributes({
+    [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
+    [SemanticResourceAttributes.SERVICE_VERSION]: serviceVersion,
+    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: environment
+  });
+  const resource = detected.merge(manual);
+  const propagator = new CompositePropagator({
+    propagators: [new B3Propagator()]
+  });
+  propagation.setGlobalPropagator(propagator);
+  const sampler = new ParentBasedSampler({
+    root: new TraceIdRatioBasedSampler(samplingRatio)
+  });
+  const traceExporter = new OTLPTraceExporter({
+    url: endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT
+  });
+  const metricReader = metricsEnabled ? new PeriodicExportingMetricReader({
+    exporter: new OTLPMetricExporter({
+      url: (endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT || "").replace(
+        "/v1/traces",
+        "/v1/metrics"
+      )
+    }),
+    exportIntervalMillis: metricsIntervalMs
+  }) : void 0;
+  const config = {
+    resource,
+    sampler,
+    traceExporter,
+    instrumentations: [
+      getNodeAutoInstrumentations({
+        "@opentelemetry/instrumentation-http": {
+          ignoreIncomingRequestHook: (req) => req.url?.includes("/health") ?? false
+        }
+      })
+    ],
+    autoDetectResources: false,
+    textMapPropagator: propagator,
+    logRecordProcessors: [],
+    metricReader,
+    views: [],
+    resourceDetectors: [],
+    contextManager: void 0,
+    logRecordProcessor: void 0,
+    spanLimits: void 0,
+    idGenerator: void 0
+  };
+  const sdk = new NodeSDK(config);
+  try {
+    sdk.start();
+    logger$r.info("OpenTelemetry SDK initialized");
+    tracerInstance = trace.getTracer(serviceName);
+    meterProviderInstance = metrics;
+    meterInstance = metrics.getMeter(serviceName + "-metrics");
+  } catch (err) {
+    logger$r.error("Error initializing OpenTelemetry SDK", { error: err.message });
+    tracerInstance = null;
+    meterProviderInstance = null;
+    meterInstance = null;
+  }
+  process$1.on("SIGTERM", async () => {
+    await sdk.shutdown();
+    logger$r.info("OpenTelemetry SDK shut down");
+    process$1.exit(0);
+  });
+  return sdk;
+}
+
+function initObservability(config) {
+  const services = {
+    langfuse: null,
+    langsmith: null,
+    signoz: null
+  };
+  const serviceName = process.env.MASTRA_SERVICE_NAME || config.serviceName || "deanmachines-ai-mastra";
+  const tracesEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || config.export?.endpoint || "http://localhost:4318/";
+  process.env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT || tracesEndpoint.replace("/v1/traces", "/v1/metrics");
+  const environment = config.environment || "production";
+  console.log(`Configuring observability for environment: ${environment}`);
+  {
+    initializeDefaultTracing();
+  }
+  if (config.langfuseEnabled !== false) {
+    services.langfuse = langfuse;
+  }
+  if (config.langsmithEnabled !== false) {
+    services.langsmith = configureLangSmithTracing({
+      projectName: serviceName
+      // Ensure 'enabled' is explicitly passed if the function expects it
+      // enabled: true // This might be redundant if the function enables by default
+    });
+  }
+  {
+    initSigNoz({
+      serviceName,
+      // Pass the export config down to initSigNoz, adding the required 'type'
+      export: config.export ? { ...config.export, type: "otlp" } : void 0
+      // Ensure 'enabled' is explicitly passed if the function expects it
+      // enabled: true // This might be redundant if the function enables by default
+    });
+    services.signoz = getTracer();
+  }
+  return services;
+}
 
 function createUpstashLogger({
   name,
@@ -148,302 +734,6 @@ const fileLogger = createFileLogger({
   level: process.env.LOG_LEVEL || "info",
   path: "./logs/mastra.log"
 });
-
-const { SpanStatusCode } = api;
-const OTelAttributeNames = {
-  PROMPT_TOKENS: "ai.prompt.tokens",
-  TOTAL_TOKENS: "ai.tokens.total",
-  LATENCY_MS: "ai.latency.ms"};
-
-const logger$u = createLogger({ name: "signoz-service", level: "info" });
-let sdk = null;
-let tracer = null;
-let meterProvider$1 = null;
-function initSigNoz(config = {}) {
-  const isEnabled = env.MASTRA_TELEMETRY_ENABLED?.toLowerCase() === "false" ? false : config.enabled !== false;
-  if (!isEnabled) {
-    logger$u.info("SigNoz tracing is disabled via config or MASTRA_TELEMETRY_ENABLED=false.");
-    return { tracer: null, meterProvider: null };
-  }
-  if (sdk) {
-    logger$u.warn("SigNoz tracing already initialized.");
-    return { tracer: getTracer(), meterProvider: getMeterProvider() };
-  }
-  try {
-    const serviceName = env.MASTRA_SERVICE_NAME || config.serviceName || "deanmachines-ai-mastra";
-    const tracesEndpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT || config.export?.endpoint || "http://localhost:4318/v1/traces";
-    const metricsEndpoint = env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT || tracesEndpoint.replace("/v1/traces", "/v1/metrics");
-    const headers = config.export?.headers || {};
-    logger$u.info(`Initializing SigNoz telemetry for service: ${serviceName}`, {
-      tracesEndpoint,
-      metricsEndpoint,
-      env: env.NODE_ENV || "development"
-    });
-    const resource = resourceFromAttributes({
-      [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
-      [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: env.NODE_ENV || "development",
-      [SemanticResourceAttributes.SERVICE_VERSION]: env.npm_package_version,
-      [SemanticResourceAttributes.HOST_NAME]: env.HOSTNAME || env.COMPUTERNAME,
-      [SemanticResourceAttributes.OS_TYPE]: process.platform
-    });
-    sdk = new NodeSDK({
-      resource,
-      traceExporter: new OTLPTraceExporter({ url: tracesEndpoint, headers }),
-      metricReader: new PeriodicExportingMetricReader({
-        exporter: new OTLPMetricExporter({ url: metricsEndpoint, headers }),
-        exportIntervalMillis: config.export?.metricsInterval ?? 6e4
-      }),
-      instrumentations: [getNodeAutoInstrumentations()],
-      ...env.NODE_ENV !== "production" && {
-        spanProcessor: new SimpleSpanProcessor(new ConsoleSpanExporter())
-      }
-    });
-    sdk.start();
-    tracer = api.trace.getTracer(`${serviceName}-tracer`);
-    meterProvider$1 = api.metrics.getMeterProvider();
-    process.on("SIGTERM", () => {
-      shutdownSigNoz().then(() => logger$u.info("SigNoz shutdown complete on SIGTERM.")).catch((err) => logger$u.error("Error shutting down SigNoz on SIGTERM:", err)).finally(() => process.exit(0));
-    });
-    process.on("SIGINT", () => {
-      shutdownSigNoz().then(() => logger$u.info("SigNoz shutdown complete on SIGINT.")).catch((err) => logger$u.error("Error shutting down SigNoz on SIGINT:", err)).finally(() => process.exit(0));
-    });
-    return { tracer, meterProvider: meterProvider$1 };
-  } catch (error) {
-    logger$u.error("Failed to initialize SigNoz NodeSDK", {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : void 0
-    });
-    sdk = null;
-    return { tracer: null, meterProvider: null };
-  }
-}
-function getTracer() {
-  if (!tracer) {
-    throw new Error("SigNoz tracing has not been initialized successfully. Call initSigNoz first.");
-  }
-  return tracer;
-}
-function getMeterProvider() {
-  if (!meterProvider$1) {
-    throw new Error("SigNoz metrics has not been initialized successfully. Call initSigNoz first.");
-  }
-  return meterProvider$1;
-}
-function createAISpan(name, attributes = {}, options = {}) {
-  try {
-    const currentTracer = getTracer();
-    return currentTracer.startSpan(name, {
-      attributes: {
-        "ai.operation": name,
-        ...attributes
-      },
-      ...options
-    });
-  } catch (error) {
-    logger$u.warn(`Failed to create span '${name}' - tracing likely not initialized.`, { error: error.message });
-    return api.trace.wrapSpanContext(api.INVALID_SPAN_CONTEXT);
-  }
-}
-function recordLlmMetrics(span, tokenInfo, latencyMs) {
-  if (!span || !span.isRecording()) return;
-  try {
-    if (tokenInfo?.promptTokens !== void 0) {
-      span.setAttribute(OTelAttributeNames.PROMPT_TOKENS, tokenInfo.promptTokens);
-    }
-    if (latencyMs !== void 0) {
-      span.setAttribute(OTelAttributeNames.LATENCY_MS, latencyMs);
-    }
-  } catch (error) {
-    logger$u.warn("Failed to record LLM metrics on span", { error: error.message });
-  }
-}
-function recordMetrics(span, metrics) {
-  if (!span || !span.isRecording()) return;
-  try {
-    const { status, errorMessage, latencyMs, tokens, ...extraAttributes } = metrics;
-    if (tokens !== void 0) {
-      span.setAttribute(OTelAttributeNames.TOTAL_TOKENS, tokens);
-    }
-    if (latencyMs !== void 0) {
-      span.setAttribute(OTelAttributeNames.LATENCY_MS, latencyMs);
-    }
-    for (const [key, value] of Object.entries(extraAttributes)) {
-      if (value !== void 0) {
-        span.setAttribute(key, value);
-      }
-    }
-    if (status === "error") {
-      span.setStatus({
-        code: SpanStatusCode.ERROR,
-        message: errorMessage || "Operation failed"
-      });
-      if (errorMessage) {
-        span.recordException({ name: "OperationError", message: errorMessage });
-      }
-    } else {
-      span.setStatus({
-        code: SpanStatusCode.OK
-      });
-    }
-  } catch (error) {
-    logger$u.warn("Failed to record metrics on span", { error: error.message });
-  }
-}
-function createHttpSpan(method, url, options = {}) {
-  try {
-    const currentTracer = getTracer();
-    const { attributes = {}, ...spanOptions } = options;
-    const parsedUrl = new URL(url);
-    return currentTracer.startSpan(`HTTP ${method.toUpperCase()}`, {
-      kind: api.SpanKind.CLIENT,
-      attributes: {
-        [SemanticAttributes.HTTP_METHOD]: method.toUpperCase(),
-        [SemanticAttributes.HTTP_URL]: url,
-        [SemanticAttributes.NET_PEER_NAME]: parsedUrl.hostname,
-        [SemanticAttributes.NET_PEER_PORT]: parsedUrl.port || (parsedUrl.protocol === "https:" ? 443 : 80),
-        ...attributes
-      },
-      ...spanOptions
-    });
-  } catch (error) {
-    logger$u.warn(`Failed to create HTTP span for ${method} ${url}`, { error: error.message });
-    return api.trace.wrapSpanContext(api.INVALID_SPAN_CONTEXT);
-  }
-}
-async function shutdownSigNoz() {
-  if (sdk) {
-    try {
-      logger$u.info("Shutting down SigNoz NodeSDK...");
-      await sdk.shutdown();
-      logger$u.info("SigNoz NodeSDK shutdown complete.");
-      sdk = null;
-      tracer = null;
-      meterProvider$1 = null;
-    } catch (error) {
-      logger$u.error("Error shutting down SigNoz NodeSDK", { error });
-    }
-  } else {
-    logger$u.info("SigNoz NodeSDK not initialized or already shut down.");
-  }
-}
-var signoz = {
-  init: initSigNoz,
-  getTracer,
-  getMeterProvider,
-  createSpan: createAISpan,
-  createHttpSpan,
-  recordLlmMetrics,
-  recordMetrics,
-  shutdown: shutdownSigNoz
-};
-
-const logger$t = createLogger({ name: "opentelemetry-tracing", level: "info" });
-let tracerInstance = null;
-let meterProviderInstance = null;
-let meterInstance = null;
-function initializeDefaultTracing(serviceName = "mastra-service", serviceVersion = "1.0.0") {
-  initOpenTelemetry({
-    serviceName,
-    serviceVersion,
-    environment: process$1.env.NODE_ENV || "development",
-    enabled: process$1.env.OTEL_ENABLED !== "false",
-    endpoint: process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT,
-    metricsEnabled: process$1.env.OTEL_METRICS_ENABLED !== "false",
-    metricsIntervalMs: parseInt(process$1.env.OTEL_METRICS_INTERVAL_MS || "60000", 10),
-    samplingRatio: parseFloat(process$1.env.OTEL_SAMPLING_RATIO || "1.0")
-  });
-  return {
-    tracer: tracerInstance,
-    meterProvider: meterProviderInstance,
-    meter: meterInstance
-  };
-}
-function initOpenTelemetry(options) {
-  const {
-    serviceName = "deanmachines-ai",
-    serviceVersion = "1.0.0",
-    environment = "development",
-    enabled = true,
-    endpoint,
-    metricsEnabled = true,
-    metricsIntervalMs = 6e4,
-    samplingRatio = 1
-  } = options;
-  if (!enabled) {
-    logger$t.info("OpenTelemetry tracing is disabled");
-    tracerInstance = null;
-    meterProviderInstance = null;
-    meterInstance = null;
-    return null;
-  }
-  const detected = detectResources();
-  const manual = resourceFromAttributes({
-    [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
-    [SemanticResourceAttributes.SERVICE_VERSION]: serviceVersion,
-    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: environment
-  });
-  const resource = detected.merge(manual);
-  const propagator = new CompositePropagator({
-    propagators: [new B3Propagator()]
-  });
-  propagation.setGlobalPropagator(propagator);
-  const sampler = new ParentBasedSampler({
-    root: new TraceIdRatioBasedSampler(samplingRatio)
-  });
-  const traceExporter = new OTLPTraceExporter({
-    url: endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT
-  });
-  const metricReader = metricsEnabled ? new PeriodicExportingMetricReader({
-    exporter: new OTLPMetricExporter({
-      url: (endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT || "").replace(
-        "/v1/traces",
-        "/v1/metrics"
-      )
-    }),
-    exportIntervalMillis: metricsIntervalMs
-  }) : void 0;
-  const config = {
-    resource,
-    sampler,
-    traceExporter,
-    instrumentations: [
-      getNodeAutoInstrumentations({
-        "@opentelemetry/instrumentation-http": {
-          ignoreIncomingRequestHook: (req) => req.url?.includes("/health") ?? false
-        }
-      })
-    ],
-    autoDetectResources: false,
-    textMapPropagator: propagator,
-    logRecordProcessors: [],
-    metricReader,
-    views: [],
-    resourceDetectors: [],
-    contextManager: void 0,
-    logRecordProcessor: void 0,
-    spanLimits: void 0,
-    idGenerator: void 0
-  };
-  const sdk = new NodeSDK(config);
-  try {
-    sdk.start();
-    logger$t.info("OpenTelemetry SDK initialized");
-    tracerInstance = trace.getTracer(serviceName);
-    meterProviderInstance = metrics;
-    meterInstance = metrics.getMeter(serviceName + "-metrics");
-  } catch (err) {
-    logger$t.error("Error initializing OpenTelemetry SDK", { error: err.message });
-    tracerInstance = null;
-    meterProviderInstance = null;
-    meterInstance = null;
-  }
-  process$1.on("SIGTERM", async () => {
-    await sdk.shutdown();
-    logger$t.info("OpenTelemetry SDK shut down");
-    process$1.exit(0);
-  });
-  return sdk;
-}
 
 const DEFAULT_MAX_TOKENS = 8192;
 const DEFAULT_MODELS = {
@@ -1186,31 +1476,31 @@ const codeDocumenterConfig = {
   ]
 };
 z.object({
-  documentation: z.string().describe("The generated documentation content"),
+  documentation: z.string().optional().describe("The generated documentation content"),
   apiEndpoints: z.array(
     z.object({
-      path: z.string().describe("API endpoint path"),
-      method: z.string().describe("HTTP method (GET, POST, etc.)"),
-      description: z.string().describe("Description of the endpoint's purpose"),
+      path: z.string().optional().describe("API endpoint path"),
+      method: z.string().optional().describe("HTTP method (GET, POST, etc.)"),
+      description: z.string().optional().describe("Description of the endpoint's purpose"),
       parameters: z.array(
         z.object({
-          name: z.string(),
-          type: z.string(),
-          description: z.string(),
-          required: z.boolean()
-        })
+          name: z.string().optional(),
+          type: z.string().optional(),
+          description: z.string().optional(),
+          required: z.boolean().optional()
+        }).passthrough()
       ).optional().describe("List of parameters for the endpoint"),
       responses: z.record(z.string(), z.string()).optional().describe("Possible responses")
-    })
+    }).passthrough()
   ).optional().describe("API endpoints documentation if applicable"),
   codeStructure: z.object({
     modules: z.array(z.string()).optional(),
     classes: z.array(z.string()).optional(),
     functions: z.array(z.string()).optional(),
     interfaces: z.array(z.string()).optional()
-  }).optional().describe("Overview of documented code structure"),
+  }).optional().passthrough().describe("Overview of documented code structure"),
   suggestedDiagrams: z.array(z.string()).optional().describe("Suggestions for visual documentation")
-});
+}).passthrough();
 
 const copywriterAgentConfig = {
   id: "copywriter-agent",
@@ -1841,30 +2131,29 @@ const researchAgentConfig = {
     "create-graph-rag",
     "graph-rag-query",
     "wikipedia_get_page_summary",
-    "puppeteer_web_automator"
+    "context-precision-eval",
+    "execute_code"
   ]
 };
+const findingSchema = z.object({
+  topic: z.string().describe("Specific topic or area of research").optional(),
+  insights: z.string().describe("Key insights discovered").optional(),
+  confidence: z.number().min(0).max(1).describe("Confidence level in this finding (0-1)").optional()
+}).passthrough();
+const sourceSchema = z.object({
+  title: z.string().describe("Source title").optional(),
+  url: z.string().optional().describe("Source URL if applicable"),
+  type: z.string().describe("Source type (article, paper, document, etc.)").optional(),
+  relevance: z.number().min(0).max(1).optional().describe("Relevance score (0-1)")
+}).passthrough();
 z.object({
-  summary: z.string().describe("Concise summary of the research findings"),
-  findings: z.array(
-    z.object({
-      topic: z.string().describe("Specific topic or area of research"),
-      insights: z.string().describe("Key insights discovered"),
-      confidence: z.number().min(0).max(1).describe("Confidence level in this finding (0-1)")
-    })
-  ).describe("Detailed findings from the research"),
-  sources: z.array(
-    z.object({
-      title: z.string().describe("Source title"),
-      url: z.string().optional().describe("Source URL if applicable"),
-      type: z.string().describe("Source type (article, paper, document, etc.)"),
-      relevance: z.number().min(0).max(1).optional().describe("Relevance score (0-1)")
-    })
-  ).describe("Sources used in the research"),
+  summary: z.string().describe("Concise summary of the research findings").optional(),
+  findings: z.array(findingSchema).describe("Detailed findings from the research").optional(),
+  sources: z.array(sourceSchema).describe("Sources used in the research").optional(),
   gaps: z.array(z.string()).optional().describe("Identified information gaps"),
   recommendations: z.array(z.string()).optional().describe("Recommendations based on findings"),
   nextSteps: z.array(z.string()).optional().describe("Suggested next research steps")
-});
+}).passthrough();
 
 const rlTrainerAgentConfig = {
   id: "rl-trainer-agent",
@@ -2677,136 +2966,7 @@ z.object({
   ).optional().describe("Recommendations for further improvements")
 });
 
-const logger$s = createLogger({ name: "langfuse-service", level: "info" });
-const envSchema$2 = z.object({
-  LANGFUSE_PUBLIC_KEY: z.string().min(1, "Langfuse public key is required"),
-  LANGFUSE_SECRET_KEY: z.string().min(1, "Langfuse secret key is required"),
-  LANGFUSE_HOST: z.string().url().optional().default("https://cloud.langfuse.com")
-});
-function validateEnv() {
-  try {
-    return envSchema$2.parse(env);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      const missingKeys = error.errors.filter((e) => e.code === "invalid_type" && e.received === "undefined").map((e) => e.path.join("."));
-      if (missingKeys.length > 0) {
-        logger$s.error(
-          `Missing required environment variables: ${missingKeys.join(", ")}`
-        );
-      }
-    }
-    logger$s.error("Langfuse environment validation failed:", { error });
-    throw new Error(
-      `Langfuse service configuration error: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-}
-const validatedEnv$1 = validateEnv();
-function createLangfuseClient() {
-  try {
-    return new Langfuse({
-      publicKey: validatedEnv$1.LANGFUSE_PUBLIC_KEY,
-      secretKey: validatedEnv$1.LANGFUSE_SECRET_KEY,
-      baseUrl: validatedEnv$1.LANGFUSE_HOST
-    });
-  } catch (error) {
-    logger$s.error("Failed to create Langfuse client:", { error });
-    throw new Error(
-      `Langfuse client creation failed: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-}
-const langfuseClient = createLangfuseClient();
-class LangfuseService {
-  client;
-  constructor() {
-    this.client = langfuseClient;
-  }
-  /**
-   * Create a new trace to track a user session or request
-   *
-   * @param name - Name of the trace
-   * @param options - Additional options for the trace
-   * @returns Trace object
-   */
-  createTrace(name, options) {
-    try {
-      logger$s.debug("Creating Langfuse trace", { name, ...options });
-      return this.client.trace({ name, ...options });
-    } catch (error) {
-      logger$s.error("Error creating trace:", { error, name });
-      throw new Error(`Failed to create Langfuse trace: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  /**
-   * Log a span within a trace to measure a specific operation
-   *
-   * @param name - Name of the span
-   * @param options - Configuration options for the span
-   * @returns Span object
-   */
-  createSpan(name, options) {
-    try {
-      logger$s.debug("Creating Langfuse span", { name, ...options });
-      return this.client.span({ name, ...options });
-    } catch (error) {
-      logger$s.error("Error creating span:", { error, name });
-      throw new Error(`Failed to create Langfuse span: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  /**
-   * Log a generation event (e.g., LLM call)
-   *
-   * @param name - Name of the generation
-   * @param options - Configuration options for the generation
-   * @returns Generation object
-   */
-  logGeneration(name, options) {
-    try {
-      logger$s.debug("Logging Langfuse generation", { name, ...options });
-      return this.client.generation({ name, ...options });
-    } catch (error) {
-      logger$s.error("Error logging generation:", { error, name });
-      throw new Error(`Failed to log Langfuse generation: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  /**
-   * Score a trace, span, or generation for quality evaluation
-   *
-   * @param options - Configuration options for the score
-   * @returns Score object
-   * @throws {Error} If no target ID (traceId, spanId, or generationId) is provided
-   */
-  createScore(options) {
-    try {
-      logger$s.debug("Creating Langfuse score", options);
-      if (!options.traceId && !options.spanId && !options.generationId) {
-        throw new Error("At least one of traceId, spanId, or generationId must be provided");
-      }
-      return this.client.score(options);
-    } catch (error) {
-      logger$s.error("Error creating score:", { error, name: options.name });
-      throw new Error(`Failed to create Langfuse score: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  /**
-   * Flush all pending Langfuse events
-   *
-   * @returns Promise that resolves when all events have been flushed
-   */
-  async flush() {
-    try {
-      await this.client.flush();
-      logger$s.debug("Flushed Langfuse events");
-    } catch (error) {
-      logger$s.error("Error flushing Langfuse events:", { error });
-      throw new Error(`Failed to flush Langfuse events: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-}
-const langfuse = new LangfuseService();
-
-const logger$r = createLogger({ name: "mastra-hooks", level: "debug" });
+const logger$q = createLogger({ name: "mastra-hooks", level: "debug" });
 function createResponseHook(config = {}) {
   const {
     minResponseLength = 10,
@@ -2821,7 +2981,7 @@ function createResponseHook(config = {}) {
       const currentSpan = trace.getSpan(currentContext);
       const traceId = currentSpan?.spanContext().traceId;
       const spanId = currentSpan?.spanContext().spanId;
-      logger$r.debug(`Response hook executing (attempt ${attempt}/${maxAttempts})`, {
+      logger$q.debug(`Response hook executing (attempt ${attempt}/${maxAttempts})`, {
         traceId,
         spanId,
         hasText: !!response.text,
@@ -2836,7 +2996,7 @@ function createResponseHook(config = {}) {
             comment: `Response validation attempt ${attempt}/${maxAttempts}`
           });
         } catch (err) {
-          logger$r.warn("Failed to record validation in Langfuse", { error: err });
+          logger$q.warn("Failed to record validation in Langfuse", { error: err });
         }
       }
       if (validateResponse(response)) {
@@ -2854,10 +3014,10 @@ function createResponseHook(config = {}) {
             hookSpan.setAttribute("response.attempt", attempt);
             hookSpan.end();
           }
-          logger$r.info(`Empty response, retrying (${attempt}/${maxAttempts})`);
+          logger$q.info(`Empty response, retrying (${attempt}/${maxAttempts})`);
           return onResponse(response, attempt + 1);
         }
-        logger$r.warn(`Maximum retry attempts reached (${maxAttempts})`);
+        logger$q.warn(`Maximum retry attempts reached (${maxAttempts})`);
         if (hookSpan) {
           hookSpan.setStatus({
             code: SpanStatusCode$1.ERROR,
@@ -2871,7 +3031,7 @@ function createResponseHook(config = {}) {
         };
       }
       if (response.text && response.text.length < minResponseLength) {
-        logger$r.debug(`Response too short (${response.text.length} < ${minResponseLength}), adding suggestion for elaboration`);
+        logger$q.debug(`Response too short (${response.text.length} < ${minResponseLength}), adding suggestion for elaboration`);
         if (hookSpan) {
           hookSpan.setAttribute("response.tooShort", true);
           hookSpan.setAttribute("response.length", response.text.length);
@@ -2888,7 +3048,7 @@ function createResponseHook(config = {}) {
       }
       return response;
     } catch (error) {
-      logger$r.error("Response hook error:", { error });
+      logger$q.error("Response hook error:", { error });
       if (hookSpan) {
         hookSpan.setStatus({
           code: SpanStatusCode$1.ERROR,
@@ -2965,7 +3125,7 @@ function createEmbeddings(apiKey, modelName) {
   });
 }
 
-const logger$q = createLogger({ name: "vector-query-tool", level: "info" });
+const logger$p = createLogger({ name: "vector-query-tool", level: "info" });
 const envSchema$1 = z.object({
   GOOGLE_AI_API_KEY: z.string().min(1, "Google AI API key is required"),
   PINECONE_INDEX: z.string().default("Default"),
@@ -2976,7 +3136,7 @@ const validatedEnv = (() => {
   try {
     return envSchema$1.parse(env);
   } catch (error) {
-    logger$q.error("Environment validation failed:", { error });
+    logger$p.error("Environment validation failed:", { error });
     throw new Error(
       `Vector query tool configuration error: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -2991,12 +3151,12 @@ function createMastraVectorQueryTool(config = {}) {
     const dimensions = config.dimensions || validatedEnv.PINECONE_DIMENSION;
     const apiKey = config.apiKey || validatedEnv.GOOGLE_AI_API_KEY;
     const topK = config.topK || 5;
-    logger$q.info(
+    logger$p.info(
       `Creating vector query tool for ${vectorStoreName}:${indexName}`
     );
     let embeddingModel;
     if (embeddingProvider === "tiktoken") {
-      logger$q.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
+      logger$p.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
       const tiktokenAdapter = {
         specificationVersion: "v1",
         provider: "tiktoken",
@@ -3020,7 +3180,7 @@ function createMastraVectorQueryTool(config = {}) {
             }
             return { embeddings: [{ embedding }] };
           } catch (error) {
-            logger$q.error("Tiktoken embedding error:", { error });
+            logger$p.error("Tiktoken embedding error:", { error });
             throw new Error(
               `Tiktoken embedding failed: ${error instanceof Error ? error.message : String(error)}`
             );
@@ -3050,7 +3210,7 @@ function createMastraVectorQueryTool(config = {}) {
       };
       embeddingModel = tiktokenAdapter;
     } else {
-      logger$q.info("Using Google embeddings");
+      logger$p.info("Using Google embeddings");
       embeddingModel = createEmbeddings(
         apiKey,
         "models/gemini-embedding-exp-03-07"
@@ -3078,10 +3238,10 @@ function createMastraVectorQueryTool(config = {}) {
       description,
       enableFilter: config.enableFilters
     });
-    logger$q.info(`Vector query tool created: ${toolId}`);
+    logger$p.info(`Vector query tool created: ${toolId}`);
     return tool;
   } catch (error) {
-    logger$q.error("Failed to create vector query tool:", { error });
+    logger$p.error("Failed to create vector query tool:", { error });
     throw new Error(
       `Vector query tool creation failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -3471,83 +3631,6 @@ function createMastraExaSearchTools(config) {
   }
   return mastraTools;
 }
-
-let langsmithClient = null;
-function configureLangSmithTracing(config) {
-  if (langsmithClient) {
-    return langsmithClient;
-  }
-  try {
-    const apiKey = env.LANGSMITH_API_KEY;
-    const endpoint = env.LANGSMITH_ENDPOINT;
-    if (!apiKey) {
-      console.warn("LangSmith API key not provided, tracing disabled");
-      return null;
-    }
-    process.env.LANGCHAIN_TRACING_V2 = env.LANGSMITH_TRACING_V2 || "true";
-    process.env.LANGCHAIN_ENDPOINT = endpoint || "https://api.smith.langchain.com";
-    process.env.LANGCHAIN_API_KEY = apiKey;
-    process.env.LANGCHAIN_PROJECT = "DeanmachinesAI";
-    langsmithClient = new Client({
-      apiKey,
-      apiUrl: endpoint || "https://api.smith.langchain.com"
-    });
-    console.log("LangSmith tracing configured successfully");
-    return langsmithClient;
-  } catch (error) {
-    console.error("Failed to configure LangSmith tracing:", error);
-    return null;
-  }
-}
-async function createLangSmithRun(name, tags) {
-  if (!langsmithClient) {
-    configureLangSmithTracing();
-  }
-  if (!langsmithClient) {
-    return Promise.resolve(v4());
-  }
-  const runId = v4();
-  try {
-    await langsmithClient.createRun({
-      id: runId,
-      // Pass the generated UUID as the run ID if supported
-      name,
-      run_type: "tool",
-      inputs: {},
-      // Add required inputs property
-      extra: {
-        tags: tags || [],
-        timestamp: (/* @__PURE__ */ new Date()).toISOString()
-      }
-    });
-    return runId;
-  } catch (error) {
-    console.error("Error creating LangSmith run:", error);
-    return v4();
-  }
-}
-async function trackFeedback(runId, feedback) {
-  if (!langsmithClient) {
-    configureLangSmithTracing();
-  }
-  if (!langsmithClient) {
-    console.warn("LangSmith client not available, feedback not tracked");
-    return false;
-  }
-  try {
-    const feedbackKey = feedback.key || "accuracy";
-    await langsmithClient.createFeedback(runId, feedbackKey, {
-      score: feedback.score,
-      comment: feedback.comment,
-      value: feedback.value
-    });
-    return true;
-  } catch (error) {
-    console.error("Error tracking feedback in LangSmith:", error);
-    return false;
-  }
-}
-configureLangSmithTracing();
 
 var FileEncoding = /* @__PURE__ */ ((FileEncoding2) => {
   FileEncoding2["UTF8"] = "utf8";
@@ -4192,7 +4275,7 @@ const listFilesTool = createTool({
   }
 });
 
-const logger$p = createLogger({ name: "thread-manager", level: "info" });
+const logger$o = createLogger({ name: "thread-manager", level: "info" });
 class ThreadManager {
   threads = /* @__PURE__ */ new Map();
   resourceThreads = /* @__PURE__ */ new Map();
@@ -4206,7 +4289,7 @@ class ThreadManager {
    */
   async createThread(options) {
     const span = createAISpan("thread.create", { resourceId: options.resourceId });
-    logger$p.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
+    logger$o.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
     const startTime = Date.now();
     let runId;
     try {
@@ -4222,7 +4305,7 @@ class ThreadManager {
         this.resourceThreads.set(options.resourceId, /* @__PURE__ */ new Set());
       }
       this.resourceThreads.get(options.resourceId)?.add(threadId);
-      logger$p.info("Thread created", { threadId, resourceId: options.resourceId });
+      logger$o.info("Thread created", { threadId, resourceId: options.resourceId });
       span.setStatus({ code: 1 });
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "success" });
       runId = await createLangSmithRun("thread.create", [options.resourceId]);
@@ -4231,7 +4314,7 @@ class ThreadManager {
     } catch (error) {
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "error", errorMessage: String(error) });
       if (runId) await trackFeedback(runId, { score: 0, comment: "Thread creation failed", value: error });
-      logger$p.error("Failed to create thread", { error });
+      logger$o.error("Failed to create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -4248,11 +4331,11 @@ class ThreadManager {
     const span = createAISpan("thread.get", { threadId });
     try {
       const thread = this.threads.get(threadId);
-      logger$p.info("Get thread", { threadId, found: !!thread });
+      logger$o.info("Get thread", { threadId, found: !!thread });
       span.setStatus({ code: 1 });
       return thread;
     } catch (error) {
-      logger$p.error("Failed to get thread", { error });
+      logger$o.error("Failed to get thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -4270,11 +4353,11 @@ class ThreadManager {
     try {
       const threadIds = this.resourceThreads.get(resourceId) || /* @__PURE__ */ new Set();
       const threads = Array.from(threadIds).map((id) => this.threads.get(id)).filter((thread) => thread !== void 0);
-      logger$p.info("Get threads by resource", { resourceId, count: threads.length });
+      logger$o.info("Get threads by resource", { resourceId, count: threads.length });
       span.setStatus({ code: 1 });
       return threads;
     } catch (error) {
-      logger$p.error("Failed to get threads by resource", { error });
+      logger$o.error("Failed to get threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -4292,16 +4375,16 @@ class ThreadManager {
     try {
       const threads = this.getThreadsByResource(resourceId);
       if (threads.length === 0) {
-        logger$p.info("No threads found for resource", { resourceId });
+        logger$o.info("No threads found for resource", { resourceId });
         span.setStatus({ code: 1 });
         return void 0;
       }
       const mostRecent = threads.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-      logger$p.info("Most recent thread", { resourceId, threadId: mostRecent.id });
+      logger$o.info("Most recent thread", { resourceId, threadId: mostRecent.id });
       span.setStatus({ code: 1 });
       return mostRecent;
     } catch (error) {
-      logger$p.error("Failed to get most recent thread", { error });
+      logger$o.error("Failed to get most recent thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -4320,16 +4403,16 @@ class ThreadManager {
     try {
       const existingThread = this.getMostRecentThread(resourceId);
       if (existingThread) {
-        logger$p.info("Found existing thread", { resourceId, threadId: existingThread.id });
+        logger$o.info("Found existing thread", { resourceId, threadId: existingThread.id });
         span.setStatus({ code: 1 });
         return existingThread;
       }
-      logger$p.info("No existing thread, creating new", { resourceId });
+      logger$o.info("No existing thread, creating new", { resourceId });
       const newThread = await this.createThread({ resourceId, metadata });
       span.setStatus({ code: 1 });
       return newThread;
     } catch (error) {
-      logger$p.error("Failed to get or create thread", { error });
+      logger$o.error("Failed to get or create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -4348,11 +4431,11 @@ class ThreadManager {
       const thread = this.threads.get(threadId);
       if (thread) {
         thread.lastReadAt = date;
-        logger$p.info("Marked thread as read", { threadId, date });
+        logger$o.info("Marked thread as read", { threadId, date });
       }
       span.setStatus({ code: 1 });
     } catch (error) {
-      logger$p.error("Failed to mark thread as read", { error });
+      logger$o.error("Failed to mark thread as read", { error });
       span.setStatus({ code: 2, message: String(error) });
     } finally {
       span.end();
@@ -4371,11 +4454,11 @@ class ThreadManager {
         const lastRead = this.threadReadStatus.get(thread.id);
         return !lastRead || thread.createdAt > lastRead;
       });
-      logger$p.info("Get unread threads by resource", { resourceId, count: unread.length });
+      logger$o.info("Get unread threads by resource", { resourceId, count: unread.length });
       span.setStatus({ code: 1 });
       return unread;
     } catch (error) {
-      logger$p.error("Failed to get unread threads by resource", { error });
+      logger$o.error("Failed to get unread threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -4832,15 +4915,13 @@ function determineTrend(values) {
   return "stable";
 }
 
-const logger$o = createLogger({ name: "Memory", level: "debug" });
-logger$o.info("Initializing Memory with LibSQL storage");
 const defaultMemoryConfig = {
-  lastMessages: 200,
+  lastMessages: 50,
   semanticRecall: {
-    topK: 8,
+    topK: 5,
     messageRange: {
-      before: 4,
-      after: 2
+      before: 2,
+      after: 1
     }
   },
   workingMemory: {
@@ -6021,48 +6102,6 @@ function createMastraE2BTools(config = {}) {
     mastraTools.execute_code.outputSchema = E2BOutputSchema;
   }
   return mastraTools;
-}
-
-function createLangChainModel(config = {}) {
-  if (config.enableTracing !== false) {
-    configureLangSmithTracing();
-  }
-  const callbacks = config.callbacks || [];
-  switch (config.provider || "google") {
-    case "openai":
-      if (!env.OPENAI_API_KEY) {
-        throw new Error("OpenAI API key is required");
-      }
-      return new ChatOpenAI({
-        modelName: config.modelName || "gpt-4",
-        temperature: config.temperature || 0.7,
-        maxTokens: config.maxTokens,
-        callbacks
-      });
-    case "anthropic":
-      if (!env.ANTHROPIC_API_KEY) {
-        throw new Error("Anthropic API key is required");
-      }
-      return new ChatAnthropic({
-        modelName: config.modelName || "claude-3-sonnet-20240229",
-        temperature: config.temperature || 0.7,
-        maxTokens: config.maxTokens,
-        anthropicApiKey: env.ANTHROPIC_API_KEY,
-        callbacks
-      });
-    case "google":
-    default:
-      if (!env.GOOGLE_GENERATIVE_AI_API_KEY) {
-        throw new Error("Google AI API key is required");
-      }
-      return new ChatGoogleGenerativeAI({
-        model: config.modelName || env.MODEL || "models/gemini-2.0-flash",
-        apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY,
-        temperature: config.temperature || 0.7,
-        maxOutputTokens: config.maxTokens,
-        callbacks
-      });
-  }
 }
 
 async function createGraphRelationships(documents, embeddings, threshold = 0.7) {
@@ -8603,6 +8642,7 @@ logger$k.info(`LLMChain tools included: ${extraTools.some((t) => t.id.startsWith
 logger$k.info(`E2B tools included: ${extraTools.some((t) => t.id.startsWith("e2b_"))}`);
 logger$k.info(`Arxiv tools included: ${extraTools.some((t) => t.id.startsWith("arxiv_"))}`);
 logger$k.info(`AI SDK tools included: ${extraTools.some((t) => t.id.startsWith("ai-sdk_"))}`);
+console.log("All available tool IDs:", Array.from(allToolsMap.keys()));
 
 initializeDefaultTracing();
 const { tracer: signozTracer, meterProvider } = initSigNoz({
@@ -10005,6 +10045,12 @@ const ragWorkflow = new Workflow({
 }).step(researchStep).then(analysisStep).then(documentationStep).then(feedbackStep);
 ragWorkflow.commit();
 
+initObservability({
+  serviceName: process.env.MASTRA_SERVICE_NAME || "deanmachines-ai-mastra",
+  export: {
+    endpoint: "http://host.docker.internal:4318/"
+  }
+});
 const logger$1 = createLogger({
   name: "DeanMachinesAI-MastraCore",
   level: process.env.LOG_LEVEL === "debug" ? "debug" : "info"
@@ -10022,7 +10068,7 @@ const mastra = new Mastra({
   // Workflows from workflows/index.ts (workflowFactory removed as it's a function)
   logger: logger$1
   // Configured logger
-  // Add other global configs as needed (storage, vectors, telemetry, etc.)
+  // Telemetry is initialized globally via initObservability
 });
 const agentCount = Object.keys(agents).length;
 const networkCount = Object.keys(networks).length;

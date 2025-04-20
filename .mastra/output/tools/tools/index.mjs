@@ -29,7 +29,7 @@ import { SimpleSpanProcessor, ConsoleSpanExporter } from '@opentelemetry/sdk-tra
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { SemanticAttributes, SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
 import * as api from '@opentelemetry/api';
-import { propagation, trace, metrics, context } from '@opentelemetry/api';
+import { propagation, trace, metrics } from '@opentelemetry/api';
 import { resourceFromAttributes, detectResources } from '@opentelemetry/resources';
 import crypto, { randomUUID } from 'crypto';
 import { vertex } from '@ai-sdk/google-vertex';
@@ -125,7 +125,7 @@ function createEmbeddings(apiKey, modelName) {
   });
 }
 
-const logger$a = createLogger({ name: "vector-query-tool", level: "info" });
+const logger$9 = createLogger({ name: "vector-query-tool", level: "info" });
 const envSchema$2 = z.object({
   GOOGLE_AI_API_KEY: z.string().min(1, "Google AI API key is required"),
   PINECONE_INDEX: z.string().default("Default"),
@@ -136,7 +136,7 @@ const validatedEnv$1 = (() => {
   try {
     return envSchema$2.parse(env);
   } catch (error) {
-    logger$a.error("Environment validation failed:", { error });
+    logger$9.error("Environment validation failed:", { error });
     throw new Error(
       `Vector query tool configuration error: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -151,12 +151,12 @@ function createMastraVectorQueryTool(config = {}) {
     const dimensions = config.dimensions || validatedEnv$1.PINECONE_DIMENSION;
     const apiKey = config.apiKey || validatedEnv$1.GOOGLE_AI_API_KEY;
     const topK = config.topK || 5;
-    logger$a.info(
+    logger$9.info(
       `Creating vector query tool for ${vectorStoreName}:${indexName}`
     );
     let embeddingModel;
     if (embeddingProvider === "tiktoken") {
-      logger$a.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
+      logger$9.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
       const tiktokenAdapter = {
         specificationVersion: "v1",
         provider: "tiktoken",
@@ -180,7 +180,7 @@ function createMastraVectorQueryTool(config = {}) {
             }
             return { embeddings: [{ embedding }] };
           } catch (error) {
-            logger$a.error("Tiktoken embedding error:", { error });
+            logger$9.error("Tiktoken embedding error:", { error });
             throw new Error(
               `Tiktoken embedding failed: ${error instanceof Error ? error.message : String(error)}`
             );
@@ -210,7 +210,7 @@ function createMastraVectorQueryTool(config = {}) {
       };
       embeddingModel = tiktokenAdapter;
     } else {
-      logger$a.info("Using Google embeddings");
+      logger$9.info("Using Google embeddings");
       embeddingModel = createEmbeddings(
         apiKey,
         "models/gemini-embedding-exp-03-07"
@@ -238,10 +238,10 @@ function createMastraVectorQueryTool(config = {}) {
       description,
       enableFilter: config.enableFilters
     });
-    logger$a.info(`Vector query tool created: ${toolId}`);
+    logger$9.info(`Vector query tool created: ${toolId}`);
     return tool;
   } catch (error) {
-    logger$a.error("Failed to create vector query tool:", { error });
+    logger$9.error("Failed to create vector query tool:", { error });
     throw new Error(
       `Vector query tool creation failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -1382,26 +1382,26 @@ const OTelAttributeNames = {
   ERROR_STACK: "error.stack"
 };
 
-const logger$9 = createLogger({ name: "signoz-service", level: "info" });
+const logger$8 = createLogger({ name: "signoz-service", level: "info" });
 let sdk = null;
 let tracer = null;
 let meterProvider = null;
 function initSigNoz(config = {}) {
   const isEnabled = env.MASTRA_TELEMETRY_ENABLED?.toLowerCase() === "false" ? false : config.enabled !== false;
   if (!isEnabled) {
-    logger$9.info("SigNoz tracing is disabled via config or MASTRA_TELEMETRY_ENABLED=false.");
+    logger$8.info("SigNoz tracing is disabled via config or MASTRA_TELEMETRY_ENABLED=false.");
     return { tracer: null, meterProvider: null };
   }
   if (sdk) {
-    logger$9.warn("SigNoz tracing already initialized.");
+    logger$8.warn("SigNoz tracing already initialized.");
     return { tracer: getTracer(), meterProvider: getMeterProvider() };
   }
   try {
     const serviceName = env.MASTRA_SERVICE_NAME || config.serviceName || "deanmachines-ai-mastra";
-    const tracesEndpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT || config.export?.endpoint || "http://localhost:4318/v1/traces";
+    const tracesEndpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT || config.export?.endpoint || "http://localhost:4318/";
     const metricsEndpoint = env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT || tracesEndpoint.replace("/v1/traces", "/v1/metrics");
     const headers = config.export?.headers || {};
-    logger$9.info(`Initializing SigNoz telemetry for service: ${serviceName}`, {
+    logger$8.info(`Initializing SigNoz telemetry for service: ${serviceName}`, {
       tracesEndpoint,
       metricsEndpoint,
       env: env.NODE_ENV || "development"
@@ -1413,6 +1413,7 @@ function initSigNoz(config = {}) {
       [SemanticResourceAttributes.HOST_NAME]: env.HOSTNAME || env.COMPUTERNAME,
       [SemanticResourceAttributes.OS_TYPE]: process.platform
     });
+    logger$8.info(`Initializing SigNoz: traces\u2192${tracesEndpoint}, metrics\u2192${metricsEndpoint}`);
     sdk = new NodeSDK({
       resource,
       traceExporter: new OTLPTraceExporter({ url: tracesEndpoint, headers }),
@@ -1426,17 +1427,18 @@ function initSigNoz(config = {}) {
       }
     });
     sdk.start();
+    logger$8.info("SigNoz NodeSDK started");
     tracer = api.trace.getTracer(`${serviceName}-tracer`);
     meterProvider = api.metrics.getMeterProvider();
     process.on("SIGTERM", () => {
-      shutdownSigNoz().then(() => logger$9.info("SigNoz shutdown complete on SIGTERM.")).catch((err) => logger$9.error("Error shutting down SigNoz on SIGTERM:", err)).finally(() => process.exit(0));
+      shutdownSigNoz().then(() => logger$8.info("SigNoz shutdown complete on SIGTERM.")).catch((err) => logger$8.error("Error shutting down SigNoz on SIGTERM:", err)).finally(() => process.exit(0));
     });
     process.on("SIGINT", () => {
-      shutdownSigNoz().then(() => logger$9.info("SigNoz shutdown complete on SIGINT.")).catch((err) => logger$9.error("Error shutting down SigNoz on SIGINT:", err)).finally(() => process.exit(0));
+      shutdownSigNoz().then(() => logger$8.info("SigNoz shutdown complete on SIGINT.")).catch((err) => logger$8.error("Error shutting down SigNoz on SIGINT:", err)).finally(() => process.exit(0));
     });
     return { tracer, meterProvider };
   } catch (error) {
-    logger$9.error("Failed to initialize SigNoz NodeSDK", {
+    logger$8.error("Failed to initialize SigNoz NodeSDK", {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : void 0
     });
@@ -1467,7 +1469,7 @@ function createAISpan(name, attributes = {}, options = {}) {
       ...options
     });
   } catch (error) {
-    logger$9.warn(`Failed to create span '${name}' - tracing likely not initialized.`, { error: error.message });
+    logger$8.warn(`Failed to create span '${name}' - tracing likely not initialized.`, { error: error.message });
     return api.trace.wrapSpanContext(api.INVALID_SPAN_CONTEXT);
   }
 }
@@ -1481,7 +1483,7 @@ function recordLlmMetrics(span, tokenInfo, latencyMs) {
       span.setAttribute(OTelAttributeNames.LATENCY_MS, latencyMs);
     }
   } catch (error) {
-    logger$9.warn("Failed to record LLM metrics on span", { error: error.message });
+    logger$8.warn("Failed to record LLM metrics on span", { error: error.message });
   }
 }
 function recordMetrics(span, metrics) {
@@ -1513,7 +1515,7 @@ function recordMetrics(span, metrics) {
       });
     }
   } catch (error) {
-    logger$9.warn("Failed to record metrics on span", { error: error.message });
+    logger$8.warn("Failed to record metrics on span", { error: error.message });
   }
 }
 function createHttpSpan(method, url, options = {}) {
@@ -1533,24 +1535,24 @@ function createHttpSpan(method, url, options = {}) {
       ...spanOptions
     });
   } catch (error) {
-    logger$9.warn(`Failed to create HTTP span for ${method} ${url}`, { error: error.message });
+    logger$8.warn(`Failed to create HTTP span for ${method} ${url}`, { error: error.message });
     return api.trace.wrapSpanContext(api.INVALID_SPAN_CONTEXT);
   }
 }
 async function shutdownSigNoz() {
   if (sdk) {
     try {
-      logger$9.info("Shutting down SigNoz NodeSDK...");
+      logger$8.info("Shutting down SigNoz NodeSDK...");
       await sdk.shutdown();
-      logger$9.info("SigNoz NodeSDK shutdown complete.");
+      logger$8.info("SigNoz NodeSDK shutdown complete.");
       sdk = null;
       tracer = null;
       meterProvider = null;
     } catch (error) {
-      logger$9.error("Error shutting down SigNoz NodeSDK", { error });
+      logger$8.error("Error shutting down SigNoz NodeSDK", { error });
     }
   } else {
-    logger$9.info("SigNoz NodeSDK not initialized or already shut down.");
+    logger$8.info("SigNoz NodeSDK not initialized or already shut down.");
   }
 }
 var signoz = {
@@ -1564,7 +1566,7 @@ var signoz = {
   shutdown: shutdownSigNoz
 };
 
-const logger$8 = createLogger({ name: "thread-manager", level: "info" });
+const logger$7 = createLogger({ name: "thread-manager", level: "info" });
 class ThreadManager {
   threads = /* @__PURE__ */ new Map();
   resourceThreads = /* @__PURE__ */ new Map();
@@ -1578,7 +1580,7 @@ class ThreadManager {
    */
   async createThread(options) {
     const span = createAISpan("thread.create", { resourceId: options.resourceId });
-    logger$8.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
+    logger$7.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
     const startTime = Date.now();
     let runId;
     try {
@@ -1594,7 +1596,7 @@ class ThreadManager {
         this.resourceThreads.set(options.resourceId, /* @__PURE__ */ new Set());
       }
       this.resourceThreads.get(options.resourceId)?.add(threadId);
-      logger$8.info("Thread created", { threadId, resourceId: options.resourceId });
+      logger$7.info("Thread created", { threadId, resourceId: options.resourceId });
       span.setStatus({ code: 1 });
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "success" });
       runId = await createLangSmithRun("thread.create", [options.resourceId]);
@@ -1603,7 +1605,7 @@ class ThreadManager {
     } catch (error) {
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "error", errorMessage: String(error) });
       if (runId) await trackFeedback(runId, { score: 0, comment: "Thread creation failed", value: error });
-      logger$8.error("Failed to create thread", { error });
+      logger$7.error("Failed to create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -1620,11 +1622,11 @@ class ThreadManager {
     const span = createAISpan("thread.get", { threadId });
     try {
       const thread = this.threads.get(threadId);
-      logger$8.info("Get thread", { threadId, found: !!thread });
+      logger$7.info("Get thread", { threadId, found: !!thread });
       span.setStatus({ code: 1 });
       return thread;
     } catch (error) {
-      logger$8.error("Failed to get thread", { error });
+      logger$7.error("Failed to get thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -1642,11 +1644,11 @@ class ThreadManager {
     try {
       const threadIds = this.resourceThreads.get(resourceId) || /* @__PURE__ */ new Set();
       const threads = Array.from(threadIds).map((id) => this.threads.get(id)).filter((thread) => thread !== void 0);
-      logger$8.info("Get threads by resource", { resourceId, count: threads.length });
+      logger$7.info("Get threads by resource", { resourceId, count: threads.length });
       span.setStatus({ code: 1 });
       return threads;
     } catch (error) {
-      logger$8.error("Failed to get threads by resource", { error });
+      logger$7.error("Failed to get threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -1664,16 +1666,16 @@ class ThreadManager {
     try {
       const threads = this.getThreadsByResource(resourceId);
       if (threads.length === 0) {
-        logger$8.info("No threads found for resource", { resourceId });
+        logger$7.info("No threads found for resource", { resourceId });
         span.setStatus({ code: 1 });
         return void 0;
       }
       const mostRecent = threads.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-      logger$8.info("Most recent thread", { resourceId, threadId: mostRecent.id });
+      logger$7.info("Most recent thread", { resourceId, threadId: mostRecent.id });
       span.setStatus({ code: 1 });
       return mostRecent;
     } catch (error) {
-      logger$8.error("Failed to get most recent thread", { error });
+      logger$7.error("Failed to get most recent thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -1692,16 +1694,16 @@ class ThreadManager {
     try {
       const existingThread = this.getMostRecentThread(resourceId);
       if (existingThread) {
-        logger$8.info("Found existing thread", { resourceId, threadId: existingThread.id });
+        logger$7.info("Found existing thread", { resourceId, threadId: existingThread.id });
         span.setStatus({ code: 1 });
         return existingThread;
       }
-      logger$8.info("No existing thread, creating new", { resourceId });
+      logger$7.info("No existing thread, creating new", { resourceId });
       const newThread = await this.createThread({ resourceId, metadata });
       span.setStatus({ code: 1 });
       return newThread;
     } catch (error) {
-      logger$8.error("Failed to get or create thread", { error });
+      logger$7.error("Failed to get or create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -1720,11 +1722,11 @@ class ThreadManager {
       const thread = this.threads.get(threadId);
       if (thread) {
         thread.lastReadAt = date;
-        logger$8.info("Marked thread as read", { threadId, date });
+        logger$7.info("Marked thread as read", { threadId, date });
       }
       span.setStatus({ code: 1 });
     } catch (error) {
-      logger$8.error("Failed to mark thread as read", { error });
+      logger$7.error("Failed to mark thread as read", { error });
       span.setStatus({ code: 2, message: String(error) });
     } finally {
       span.end();
@@ -1743,11 +1745,11 @@ class ThreadManager {
         const lastRead = this.threadReadStatus.get(thread.id);
         return !lastRead || thread.createdAt > lastRead;
       });
-      logger$8.info("Get unread threads by resource", { resourceId, count: unread.length });
+      logger$7.info("Get unread threads by resource", { resourceId, count: unread.length });
       span.setStatus({ code: 1 });
       return unread;
     } catch (error) {
-      logger$8.error("Failed to get unread threads by resource", { error });
+      logger$7.error("Failed to get unread threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -2379,15 +2381,13 @@ function getUnreadFeedbackThreads(agentId) {
   return threadManager.getUnreadThreadsByResource(agentId);
 }
 
-const logger$7 = createLogger({ name: "Memory", level: "debug" });
-logger$7.info("Initializing Memory with LibSQL storage");
 const defaultMemoryConfig = {
-  lastMessages: 200,
+  lastMessages: 50,
   semanticRecall: {
-    topK: 8,
+    topK: 5,
     messageRange: {
-      before: 4,
-      after: 2
+      before: 2,
+      after: 1
     }
   },
   workingMemory: {
@@ -5060,32 +5060,6 @@ const summarizationEvalTool = createTool({
 });
 
 const logger$3 = createLogger({ name: "opentelemetry-tracing", level: "info" });
-let tracerInstance = null;
-let meterProviderInstance = null;
-let meterInstance = null;
-function initializeDefaultTracing(serviceName = "mastra-service", serviceVersion = "1.0.0") {
-  initOpenTelemetry({
-    serviceName,
-    serviceVersion,
-    environment: process$1.env.NODE_ENV || "development",
-    enabled: process$1.env.OTEL_ENABLED !== "false",
-    endpoint: process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT,
-    metricsEnabled: process$1.env.OTEL_METRICS_ENABLED !== "false",
-    metricsIntervalMs: parseInt(process$1.env.OTEL_METRICS_INTERVAL_MS || "60000", 10),
-    samplingRatio: parseFloat(process$1.env.OTEL_SAMPLING_RATIO || "1.0")
-  });
-  return {
-    tracer: tracerInstance,
-    meterProvider: meterProviderInstance,
-    meter: meterInstance
-  };
-}
-function logWithTraceContext(target, level, message, data) {
-  const span = trace.getSpan(context.active());
-  const traceFields = span ? { trace_id: span.spanContext().traceId, span_id: span.spanContext().spanId } : {};
-  const fn = target[level] ?? target.info ?? console.log;
-  fn.call(target, message, { ...data, ...traceFields });
-}
 function initOpenTelemetry(options) {
   const {
     serviceName = "deanmachines-ai",
@@ -5099,9 +5073,6 @@ function initOpenTelemetry(options) {
   } = options;
   if (!enabled) {
     logger$3.info("OpenTelemetry tracing is disabled");
-    tracerInstance = null;
-    meterProviderInstance = null;
-    meterInstance = null;
     return null;
   }
   const detected = detectResources();
@@ -5156,14 +5127,10 @@ function initOpenTelemetry(options) {
   try {
     sdk.start();
     logger$3.info("OpenTelemetry SDK initialized");
-    tracerInstance = trace.getTracer(serviceName);
-    meterProviderInstance = metrics;
-    meterInstance = metrics.getMeter(serviceName + "-metrics");
+    trace.getTracer(serviceName);
+    metrics.getMeter(serviceName + "-metrics");
   } catch (err) {
     logger$3.error("Error initializing OpenTelemetry SDK", { error: err.message });
-    tracerInstance = null;
-    meterProviderInstance = null;
-    meterInstance = null;
   }
   process$1.on("SIGTERM", async () => {
     await sdk.shutdown();
@@ -5171,17 +5138,6 @@ function initOpenTelemetry(options) {
     process$1.exit(0);
   });
   return sdk;
-}
-function getMeter() {
-  return meterInstance;
-}
-function createCounter(name, description) {
-  const meter = meterInstance || metrics.getMeter("mastra-metrics");
-  return meter.createCounter(name, { description });
-}
-function createHistogram(name, description) {
-  const meter = meterInstance || metrics.getMeter("mastra-metrics");
-  return meter.createHistogram(name, { description });
 }
 
 const startAISpanTool = createTool({
@@ -6906,5 +6862,6 @@ logger.info(`LLMChain tools included: ${extraTools.some((t) => t.id.startsWith("
 logger.info(`E2B tools included: ${extraTools.some((t) => t.id.startsWith("e2b_"))}`);
 logger.info(`Arxiv tools included: ${extraTools.some((t) => t.id.startsWith("arxiv_"))}`);
 logger.info(`AI SDK tools included: ${extraTools.some((t) => t.id.startsWith("ai-sdk_"))}`);
+console.log("All available tool IDs:", Array.from(allToolsMap.keys()));
 
-export { AiSdkPromptOutputSchema, ArXivClient, ArxivDownloadPdfOutputSchema, ArxivPdfUrlOutputSchema, ArxivSearchEntrySchema, ArxivSearchOutputSchema, CryptoAggregatesSchema, CryptoTickersSchema, E2BOutputSchema, createExaSearchProvider as ExaSearchOutputSchema, ExaSearchProvider, FeedbackType, FileEncoding, FileWriteMode, GitHubBranchSchema, GitHubBranchesListSchema, GitHubClient, GitHubCodeSearchItemSchema, GitHubCodeSearchResultsSchema, GitHubCommitSchema, GitHubCommitsListSchema, GitHubIssueSchema, GitHubIssuesListSchema, GitHubPullSchema, GitHubPullsListSchema, GitHubReleaseSchema, GitHubReleasesListSchema, GitHubRepoSchema, GitHubReposListSchema, GitHubUserSchema, LLMChainOutputSchema, MastraPolygonClient, MastraRedditClient, OTelAttributeNames, PreviousCloseSchema, RewardType, SpanStatusCode, SubredditPostSchema, SubredditPostsSchema, TickerAggregatesSchema, TickerDetailsSchema, TickerNewsSchema, WikipediaClient, WikipediaPageResultSchema, WikipediaSearchSchema, WikipediaSummarySchema, WikipediaThumbnailSchema, aiSdkPromptTool, allTools, allToolsMap, analyzeContentTool, analyzeFeedbackTool, applyRLInsightsTool, arxiv, calculateRewardTool, calculatorTool as calculator, collectFeedbackTool, createAISDKTools, createAISpan, createArxivClient, createBraveSearchTool, createCounter, createE2BSandboxTool, createExaSearchProvider, createFileTool, createGitHubClient, createGoogleSearchTool, createGraphRagTool, createHistogram, createHttpSpan, createLlamaIndexTools, createMastraAISDKTools, createMastraArxivTools, createMastraE2BTools, createMastraExaSearchTools, createMastraGitHubTools, createMastraLLMChainTools, createMastraLlamaIndexTools, createMastraMcpTools, createMastraPolygonTools, createMastraRedditTools, createMastraVectorQueryTool, createMastraWikipediaTools, createTavilySearchTool, createWikipediaClient, csvReaderTool, allToolsMap as default, defineRewardFunctionTool, deleteFileTool, docxReaderTool, e2b, editFileTool, embedDocumentTool, extractHtmlTextTool, filteredQueryTool, formatContentTool, getMainBranchRef, getMeter, getUnreadFeedbackThreads, googleVectorQueryTool, graphRagQueryTool, toolGroups as groups, initOpenTelemetry, initOpenTelemetryTool, initSigNoz, initializeDefaultTracing, jsonReaderTool, listFilesTool, llmChainTool, logWithTraceContext, optimizePolicyTool, puppeteerTool, readFileTool, readKnowledgeFileTool, recordLlmMetrics, recordLlmMetricsTool, recordMetrics, searchDocumentsTool, shutdownSigNoz, shutdownTracingTool, startAISpanTool, toolGroups, allToolsMap as toolMap, tracingTools, vectorQueryTool, wikipedia, writeKnowledgeFileTool, writeToFileTool };
+export { AiSdkPromptOutputSchema, ArXivClient, ArxivDownloadPdfOutputSchema, ArxivPdfUrlOutputSchema, ArxivSearchEntrySchema, ArxivSearchOutputSchema, CryptoAggregatesSchema, CryptoTickersSchema, E2BOutputSchema, createExaSearchProvider as ExaSearchOutputSchema, ExaSearchProvider, FeedbackType, FileEncoding, FileWriteMode, GitHubBranchSchema, GitHubBranchesListSchema, GitHubClient, GitHubCodeSearchItemSchema, GitHubCodeSearchResultsSchema, GitHubCommitSchema, GitHubCommitsListSchema, GitHubIssueSchema, GitHubIssuesListSchema, GitHubPullSchema, GitHubPullsListSchema, GitHubReleaseSchema, GitHubReleasesListSchema, GitHubRepoSchema, GitHubReposListSchema, GitHubUserSchema, LLMChainOutputSchema, MastraPolygonClient, MastraRedditClient, OTelAttributeNames, PreviousCloseSchema, RewardType, SpanStatusCode, SubredditPostSchema, SubredditPostsSchema, TickerAggregatesSchema, TickerDetailsSchema, TickerNewsSchema, WikipediaClient, WikipediaPageResultSchema, WikipediaSearchSchema, WikipediaSummarySchema, WikipediaThumbnailSchema, aiSdkPromptTool, allTools, allToolsMap, analyzeContentTool, analyzeFeedbackTool, applyRLInsightsTool, arxiv, calculateRewardTool, calculatorTool as calculator, collectFeedbackTool, createAISDKTools, createAISpan, createArxivClient, createBraveSearchTool, createE2BSandboxTool, createExaSearchProvider, createFileTool, createGitHubClient, createGoogleSearchTool, createGraphRagTool, createHttpSpan, createLlamaIndexTools, createMastraAISDKTools, createMastraArxivTools, createMastraE2BTools, createMastraExaSearchTools, createMastraGitHubTools, createMastraLLMChainTools, createMastraLlamaIndexTools, createMastraMcpTools, createMastraPolygonTools, createMastraRedditTools, createMastraVectorQueryTool, createMastraWikipediaTools, createTavilySearchTool, createWikipediaClient, csvReaderTool, allToolsMap as default, defineRewardFunctionTool, deleteFileTool, docxReaderTool, e2b, editFileTool, embedDocumentTool, extractHtmlTextTool, filteredQueryTool, formatContentTool, getMainBranchRef, getMeterProvider, getTracer, getUnreadFeedbackThreads, googleVectorQueryTool, graphRagQueryTool, toolGroups as groups, initOpenTelemetryTool, initSigNoz, jsonReaderTool, listFilesTool, llmChainTool, optimizePolicyTool, puppeteerTool, readFileTool, readKnowledgeFileTool, recordLlmMetrics, recordLlmMetricsTool, recordMetrics, searchDocumentsTool, shutdownSigNoz, shutdownTracingTool, startAISpanTool, toolGroups, allToolsMap as toolMap, tracingTools, vectorQueryTool, wikipedia, writeKnowledgeFileTool, writeToFileTool };

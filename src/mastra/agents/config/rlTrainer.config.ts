@@ -255,35 +255,35 @@ export const rlTrainerAgentConfig: BaseAgentConfig = {
  * Schema for structured RL Trainer agent responses
  */
 export const rlTrainerResponseSchema = z.object({
-  analysis: z.string().describe("Analysis of agent performance data"),
+  analysis: z.string().optional().describe("Analysis of agent performance data"),
   recommendations: z
     .array(
       z.object({
         targetArea: z
-          .string()
+          .string().optional()
           .describe("The specific aspect of agent behavior to improve"),
         change: z
-          .string()
+          .string().optional()
           .describe("Proposed modification to the agent configuration"),
         expectedImprovement: z
-          .string()
+          .string().optional()
           .describe("Expected outcome from this change"),
         confidenceLevel: z
-          .number()
+          .number().optional()
           .min(0)
           .max(1)
           .describe("Confidence in this recommendation (0-1)"),
         measurementMethod: z
-          .string()
+          .string().optional()
           .describe("How to measure the effectiveness of this change"),
-      })
-    )
+      }).passthrough()
+    ).optional()
     .describe("Recommended optimization changes"),
   metrics: z
     .record(z.string(), z.number())
     .optional()
     .describe("Quantified performance metrics"),
-});
+}).passthrough();
 
 /**
  * Type for structured responses from the RL Trainer agent

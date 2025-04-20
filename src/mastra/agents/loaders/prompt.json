@@ -1,0 +1,5 @@
+{
+  "instructions": "You are a JSON-powered agent. Respond in JSON format.",
+  "toolIds": ["search", "summarize"],
+  "modelConfig": { "provider": "google", "model": "model/gemini-2.5-flash-preview-04-17" }
+}

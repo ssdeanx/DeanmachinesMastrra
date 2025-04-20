@@ -53,7 +53,7 @@ export function initSigNoz(config: OtelConfig = {}): { tracer: api.Tracer | null
 
   try {
     const serviceName = env.MASTRA_SERVICE_NAME || config.serviceName || 'deanmachines-ai-mastra';
-    const tracesEndpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT || config.export?.endpoint || 'http://localhost:4318/v1/traces';
+    const tracesEndpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT || config.export?.endpoint || 'http://localhost:4318/';
     const metricsEndpoint = env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT || tracesEndpoint.replace('/v1/traces', '/v1/metrics');
     const headers = config.export?.headers || {};
 
@@ -71,6 +71,7 @@ export function initSigNoz(config: OtelConfig = {}): { tracer: api.Tracer | null
       [SemanticResourceAttributes.OS_TYPE]: process.platform,
     });
 
+    logger.info(`Initializing SigNoz: traces→${tracesEndpoint}, metrics→${metricsEndpoint}`);
     sdk = new NodeSDK({
       resource,
       traceExporter: new OTLPTraceExporter({ url: tracesEndpoint, headers }),
@@ -85,6 +86,7 @@ export function initSigNoz(config: OtelConfig = {}): { tracer: api.Tracer | null
     });
 
     sdk.start();
+    logger.info('SigNoz NodeSDK started');
     tracer = api.trace.getTracer(`${serviceName}-tracer`);
     meterProvider = api.metrics.getMeterProvider();
 

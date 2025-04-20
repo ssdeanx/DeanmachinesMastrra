@@ -167,67 +167,65 @@ export const marketResearchAgentConfig: BaseAgentConfig = {
  * Schema for structured market research agent responses
  */
 export const marketResearchResponseSchema = z.object({
-  analysis: z.string().describe("Analysis of market data and insights"),
+  analysis: z.string().optional().describe("Analysis of market data and insights"),
   marketTrends: z
     .array(
       z.object({
-        trend: z.string().describe("Identified market trend"),
-        impact: z.string().describe("Potential impact on business"),
+        trend: z.string().optional().describe("Identified market trend"),
+        impact: z.string().optional().describe("Potential impact on business"),
         confidence: z
           .number()
           .min(0)
           .max(1)
+          .optional()
           .describe("Confidence level in this trend (0-1)"),
-      })
-    )
+      }).passthrough()
+    ).optional()
     .describe("Key market trends identified"),
   competitorAnalysis: z
     .array(
       z.object({
-        competitor: z.string().describe("Competitor name"),
-        strengths: z.array(z.string()).describe("Competitor's strengths"),
-        weaknesses: z.array(z.string()).describe("Competitor's weaknesses"),
+        competitor: z.string().optional().describe("Competitor name"),
+        strengths: z.array(z.string()).optional().describe("Competitor's strengths"),
+        weaknesses: z.array(z.string()).optional().describe("Competitor's weaknesses"),
         marketShare: z
           .number()
           .optional()
           .describe("Estimated market share percentage"),
-      })
-    )
-    .optional()
+      }).passthrough()
+    ).optional()
     .describe("Analysis of key competitors"),
   targetAudience: z
     .array(
       z.object({
-        segment: z.string().describe("Audience segment name"),
-        demographics: z.string().describe("Key demographic characteristics"),
-        needs: z.array(z.string()).describe("Primary needs and pain points"),
+        segment: z.string().optional().describe("Audience segment name"),
+        demographics: z.string().optional().describe("Key demographic characteristics"),
+        needs: z.array(z.string()).optional().describe("Primary needs and pain points"),
         opportunities: z
-          .array(z.string())
+          .array(z.string()).optional()
           .describe("Business opportunities with this segment"),
-      })
-    )
-    .optional()
+      }).passthrough()
+    ).optional()
     .describe("Target audience segments identified"),
   recommendations: z
     .array(
       z.object({
-        recommendation: z.string().describe("Strategic recommendation"),
-        rationale: z.string().describe("Data-backed rationale"),
-        priority: z.enum(["high", "medium", "low"]).describe("Priority level"),
-      })
-    )
+        recommendation: z.string().optional().describe("Strategic recommendation"),
+        rationale: z.string().optional().describe("Data-backed rationale"),
+        priority: z.enum(["high", "medium", "low"]).optional().describe("Priority level"),
+      }).passthrough()
+    ).optional()
     .describe("Strategic recommendations based on research"),
   sources: z
     .array(
       z.object({
-        title: z.string().describe("Source title"),
+        title: z.string().optional().describe("Source title"),
         url: z.string().optional().describe("Source URL"),
         relevance: z.string().optional().describe("Relevance to findings"),
-      })
-    )
-    .optional()
+      }).passthrough()
+    ).optional()
     .describe("Research sources"),
-});
+}).passthrough();
 
 /**
  * Type for structured responses from the Market Research agent

@@ -112,7 +112,6 @@ export { GitHubUserSchema };
 export { TickerDetailsSchema };
 export { SubredditPostSchema };
 export * from "../services/signoz";
-export * from "../services/tracing";
 export * from "./polygon";
 export * from "./reddit";
 export * from "./mcptool";
@@ -577,6 +576,8 @@ logger.info(`E2B tools included: ${extraTools.some(t => t.id.startsWith('e2b_'))
 logger.info(`Arxiv tools included: ${extraTools.some(t => t.id.startsWith('arxiv_'))}`); // Assuming helper creates IDs like 'arxiv_...'
 logger.info(`AI SDK tools included: ${extraTools.some(t => t.id.startsWith('ai-sdk_'))}`); // Assuming helper creates IDs like 'ai-sdk_...'
 
+
+console.log("All available tool IDs:", Array.from(allToolsMap.keys()));
 
 // For backward compatibility.
 export { allToolsMap as toolMap };

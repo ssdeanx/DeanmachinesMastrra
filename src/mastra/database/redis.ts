@@ -26,8 +26,8 @@ function traced<T>(operation: string, fn: () => Promise<T>): Promise<T> {
 let redisClient: Redis | undefined;
 try {
   redisClient = new Redis({
-    url: `https://${process.env.UPSTASH_REDIS_REST_URL}`,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+    url: `https://${process.env.UPSTASH_REDIS_REST_URL}` || "file:.mastra/mastra.db",
+    token: process.env.UPSTASH_REDIS_REST_TOKEN! || "file:.mastra/mastra.db",
   });
   logWithTraceContext(console, "info", "Upstash Redis client initialized", { url: process.env.UPSTASH_REDIS_REST_URL });
 } catch (error) {
@@ -39,8 +39,8 @@ let redisStore: UpstashStore | undefined;
 let redisMemory: Memory | undefined;
 try {
   redisStore = new UpstashStore({
-    url: `https://${process.env.UPSTASH_REDIS_REST_URL}`,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+    url: `https://${process.env.UPSTASH_REDIS_REST_URL}` || "file:.mastra/mastra.db",
+    token: process.env.UPSTASH_REDIS_REST_TOKEN! || "file:.mastra/mastra.db",
   });
   redisMemory = new Memory({
     storage: redisStore,

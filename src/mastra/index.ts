@@ -12,11 +12,21 @@
 
 import { Mastra } from "@mastra/core";
 import { createLogger } from "@mastra/core/logger";
+import { initObservability } from "./services"; // Initialize telemetry services
 import agents from "./agents"; // Central agent registry map
 import { ragWorkflow, multiAgentWorkflow, workflowFactory } from "./workflows";
 // Import agent networks from the networks file
 import { networks } from "./workflows/Networks/agentNetwork";
 
+// Initialize telemetry (SigNoz + OpenTelemetry) as early as possible
+initObservability({
+  serviceName: process.env.MASTRA_SERVICE_NAME || "deanmachines-ai-mastra",
+  signozEnabled: true,
+  otelEnabled: true,
+  export: {
+    endpoint: 'http://host.docker.internal:4318/'
+  },
+});
 
 // Configure logger with appropriate level based on environment
 const logger = createLogger({
@@ -32,7 +42,7 @@ export const mastra = new Mastra({
   networks: networks, // All registered agent networks
   workflows: { ragWorkflow, multiAgentWorkflow }, // Workflows from workflows/index.ts (workflowFactory removed as it's a function)
   logger: logger, // Configured logger
-  // Add other global configs as needed (storage, vectors, telemetry, etc.)
+  // Telemetry is initialized globally via initObservability
 });
 
 // Log initialization status for monitoring

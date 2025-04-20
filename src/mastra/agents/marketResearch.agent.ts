@@ -7,7 +7,7 @@
 import { sharedMemory } from "../database";
 import { createAgentFromConfig } from "./base.agent";
 import {marketResearchAgentConfig} from "./config";
-import { createLogger } from "@mastra/core/logger";
+import { createLogger } from "@mastra/core";
 
 const logger = createLogger({ name: "market-research-agent", level: "debug" });
 

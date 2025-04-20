@@ -7,6 +7,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.0.16] - [Agent Core & Config Loader Enhancements] - 2025-04-20
+
+### Added
+
+- **src/mastra/agents/advanced.base.agent.ts**
+  - Major refactor of the core agent base class for extensibility, modularity, and robust error handling.
+  - Added lifecycle hooks (`onInit`, `onBeforeRun`, `onAfterRun`, `onError`, `onTeardown`) to allow middleware, tracing, and custom agent logic at every stage.
+  - Integrated SigNoz and OpenTelemetry tracing at agent initialization and tool execution boundaries for deep observability.
+  - Improved type safety for agent config, runtime options, and tool registration.
+  - Provided detailed inline documentation, JSDoc, and developer comments for onboarding and future extension.
+  - Enhanced agent teardown and error recovery to prevent resource leaks and provide clear error messages.
+
+- **src/mastra/agents/format.utils.ts**
+  - Developed and exported `parseInput` and related utilities to support seamless parsing of agent configs/prompts from multiple formats:
+    - Supported formats: JSON (`.json`), YAML (`.yaml`, `.yml`), XML (`.xml`), TXT (`.txt`), Markdown (`.md`).
+    - Centralized format detection logic based on file extension and content heuristics.
+    - Added robust error handling and reporting for malformed or unsupported files.
+    - Utilities are fully extensible for future formats (add new parser, register in format map).
+    - All utility functions are documented for clarity and future extension.
+
+- **src/mastra/agents/configLoader.ts**
+  - Implemented a robust async loader utility for agent config and prompt files.
+  - Automatically detects and parses file format using `format.utils.ts`.
+  - Handles both full agent configs (structured objects) and simple prompt/instruction files (free text or markdown).
+  - Provides clear, actionable error messages for missing, invalid, or unsupported config fields.
+  - Designed for integration into agent initialization routines and example loaders.
+  - Comprehensive JSDoc and usage examples included.
+
+- **Example Prompts & Configs (src/mastra/agents/loaders/):**
+  - Added new example prompt/config files to demonstrate and test multi-format loader support:
+    - `prompt.json`: Example agent prompt/config in JSON format. Demonstrates structured prompt with fields for instructions, context, and parameters.
+    - `prompt.txt`: Plaintext agent prompt. Demonstrates support for raw text instructions.
+    - `prompt.md`: Markdown agent prompt. Demonstrates support for rich formatting, headings, and code blocks in instructions.
+    - (If present) `prompt.yaml`/`prompt.yml`: YAML-formatted agent prompt/config, showing alternative structured config.
+    - (If present) `prompt.xml`: XML-formatted agent prompt/config, for extensibility demonstration.
+  - These files are used in the loader example and serve as templates for future agent prompt/config creation.
+
+- **src/mastra/agents/loaders/example.loader.ts**
+  - Provided a comprehensive script demonstrating how to load and initialize agents from all supported prompt/config formats.
+  - Detects file format, parses config, and initializes agent with memory (including SQLite integration if configured).
+  - Serves as a reference implementation and testing harness for loader utilities.
+
+### Changed
+
+- Refactored agent initialization and config loading to use the new utilities and base class for improved reliability and developer experience.
+- Enhanced error handling and logging throughout the agent configuration and loading process.
+- Updated internal documentation and code comments to reflect new architecture and usage patterns.
+- README updated with detailed instructions and code snippets for using the new loader and example prompts.
+
+### Fixed
+
+- Addressed previous pain points with config file parsing, format detection, and error reporting.
+- Improved maintainability and extensibility for future agent and config loader development.
+
+### Developer Notes
+
+- To add a new prompt/config, create a file in `src/mastra/agents/loaders/` with the appropriate extension (`.json`, `.yaml`, `.xml`, `.txt`, `.md`).
+- The loader utilities will automatically detect the format and parse the file.
+- See `example.loader.ts` for a full workflow and integration pattern.
+- All new patterns are documented in the codebase and README for onboarding and future maintenance.
+
+---
+
+  - Integrates with format.utils.ts for seamless multi-format support.
+  - Handles both full agent configs and simple prompt/instruction files.
+  - Provides clear error messages and validation for missing or invalid config fields.
+  - Added comprehensive documentation and usage examples.
+
+### Changed
+
+- Refactored agent initialization and config loading to use the new utilities and base class for improved reliability and developer experience.
+- Enhanced error handling and logging throughout the agent configuration and loading process.
+- Updated internal documentation and code comments to reflect new architecture and usage patterns.
+
+### Fixed
+
+- Addressed previous pain points with config file parsing, format detection, and error reporting.
+- Improved maintainability and extensibility for future agent and config loader development.
+
+### Notes
+
+- These changes lay the foundation for flexible, robust agent configuration and extensible agent base classes.
+- All new patterns are documented in the codebase and README for onboarding and future maintenance.
+
+---
+
 ## [v0.0.15] - 2025-04-20
 
 ### Added

@@ -148,55 +148,40 @@ export const researchAgentConfig: BaseAgentConfig = {
     "create-graph-rag",
     "graph-rag-query",
     "wikipedia_get_page_summary",
-    "puppeteer_web_automator",
+    "context-precision-eval",
+    "execute_code",
+
   ],
 };
 
 /**
  * Schema for structured research agent responses
  */
+// Adaptable findings schema
+const findingSchema = z.object({
+  topic: z.string().describe("Specific topic or area of research").optional(),
+  insights: z.string().describe("Key insights discovered").optional(),
+  confidence: z.number().min(0).max(1).describe("Confidence level in this finding (0-1)").optional(),
+}).passthrough(); // Allow extra fields
+
+// Adaptable sources schema
+const sourceSchema = z.object({
+  title: z.string().describe("Source title").optional(),
+  url: z.string().optional().describe("Source URL if applicable"),
+  type: z.string().describe("Source type (article, paper, document, etc.)").optional(),
+  relevance: z.number().min(0).max(1).optional().describe("Relevance score (0-1)"),
+}).passthrough(); // Allow extra fields
+
+// Main adaptable response schema
 export const researchResponseSchema = z.object({
-  summary: z.string().describe("Concise summary of the research findings"),
-  findings: z
-    .array(
-      z.object({
-        topic: z.string().describe("Specific topic or area of research"),
-        insights: z.string().describe("Key insights discovered"),
-        confidence: z
-          .number()
-          .min(0)
-          .max(1)
-          .describe("Confidence level in this finding (0-1)"),
-      })
-    )
-    .describe("Detailed findings from the research"),
-  sources: z
-    .array(
-      z.object({
-        title: z.string().describe("Source title"),
-        url: z.string().optional().describe("Source URL if applicable"),
-        type: z
-          .string()
-          .describe("Source type (article, paper, document, etc.)"),
-        relevance: z
-          .number()
-          .min(0)
-          .max(1)
-          .optional()
-          .describe("Relevance score (0-1)"),
-      })
-    )
-    .describe("Sources used in the research"),
+  summary: z.string().describe("Concise summary of the research findings").optional(),
+  findings: z.array(findingSchema).describe("Detailed findings from the research").optional(),
+  sources: z.array(sourceSchema).describe("Sources used in the research").optional(),
   gaps: z.array(z.string()).optional().describe("Identified information gaps"),
-  recommendations: z
-    .array(z.string())
-    .optional()
-    .describe("Recommendations based on findings"),
-  nextSteps: z
-    .array(z.string())
-    .optional()
-    .describe("Suggested next research steps"),
-});
+  recommendations: z.array(z.string()).optional().describe("Recommendations based on findings"),
+  nextSteps: z.array(z.string()).optional().describe("Suggested next research steps"),
+}).passthrough(); // Allow extra top-level fields
+
 
 /**
  * Type for structured responses from the Research agent

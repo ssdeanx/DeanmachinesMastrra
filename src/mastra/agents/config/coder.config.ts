@@ -166,45 +166,45 @@ export const coderAgentConfig: BaseAgentConfig = {
  * Schema for structured coder agent responses
  */
 export const coderResponseSchema = z.object({
-  code: z.string().describe("The generated or refactored code"),
+  code: z.string().optional().describe("The generated or refactored code"),
   explanation: z
-    .string()
+    .string().optional()
     .describe("Explanation of the code's functionality and design decisions"),
   files: z
     .array(
       z.object({
-        name: z.string().describe("Filename"),
+        name: z.string().optional().describe("Filename"),
         path: z.string().optional().describe("File path"),
-        content: z.string().describe("File content"),
+        content: z.string().optional().describe("File content"),
         language: z.string().optional().describe("Programming language"),
-      })
+      }).passthrough()
     )
     .optional()
     .describe("Files to be created or modified"),
   dependencies: z
     .array(
       z.object({
-        name: z.string().describe("Dependency name"),
+        name: z.string().optional().describe("Dependency name"),
         version: z.string().optional().describe("Version requirement"),
         purpose: z
           .string()
           .optional()
           .describe("Why this dependency is needed"),
-      })
+      }).passthrough()
     )
     .optional()
     .describe("Required dependencies"),
   testCases: z
     .array(
       z.object({
-        description: z.string().describe("Test case description"),
+        description: z.string().optional().describe("Test case description"),
         input: z.unknown().optional().describe("Test input"),
         expectedOutput: z.unknown().optional().describe("Expected output"),
-      })
+      }).passthrough()
     )
     .optional()
     .describe("Suggested test cases"),
-});
+}).passthrough();
 
 /**
  * Type for structured responses from the Coder agent

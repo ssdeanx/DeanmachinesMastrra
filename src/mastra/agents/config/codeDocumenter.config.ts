@@ -183,23 +183,23 @@ export const codeDocumenterConfig: BaseAgentConfig = {
  */
 // --- ENSURE 'export' IS REMOVED HERE ---
 const codeDocumenterResponseSchema = z.object({
-  documentation: z.string().describe("The generated documentation content"),
+  documentation: z.string().optional().describe("The generated documentation content"),
   apiEndpoints: z
     .array(
       z.object({
-        path: z.string().describe("API endpoint path"),
-        method: z.string().describe("HTTP method (GET, POST, etc.)"),
+        path: z.string().optional().describe("API endpoint path"),
+        method: z.string().optional().describe("HTTP method (GET, POST, etc.)"),
         description: z
-          .string()
+          .string().optional()
           .describe("Description of the endpoint's purpose"),
         parameters: z
           .array(
             z.object({
-              name: z.string(),
-              type: z.string(),
-              description: z.string(),
-              required: z.boolean(),
-            })
+              name: z.string().optional(),
+              type: z.string().optional(),
+              description: z.string().optional(),
+              required: z.boolean().optional(),
+            }).passthrough()
           )
           .optional()
           .describe("List of parameters for the endpoint"),
@@ -207,7 +207,7 @@ const codeDocumenterResponseSchema = z.object({
           .record(z.string(), z.string())
           .optional()
           .describe("Possible responses"),
-      })
+      }).passthrough()
     )
     .optional()
     .describe("API endpoints documentation if applicable"),
@@ -218,13 +218,14 @@ const codeDocumenterResponseSchema = z.object({
       functions: z.array(z.string()).optional(),
       interfaces: z.array(z.string()).optional(),
     })
+    .passthrough()
     .optional()
     .describe("Overview of documented code structure"),
   suggestedDiagrams: z
     .array(z.string())
     .optional()
     .describe("Suggestions for visual documentation"),
-});
+}).passthrough();
 
 /**
  * Type for structured responses from the Code Documenter agent
