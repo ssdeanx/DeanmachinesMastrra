@@ -221,15 +221,24 @@ importers:
       '@opentelemetry/context-async-hooks':
         specifier: ^2.0.0
         version: 2.0.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/core':
+        specifier: ^2.0.0
+        version: 2.0.0(@opentelemetry/api@1.9.0)
       '@opentelemetry/exporter-metrics-otlp-proto':
         specifier: ^0.200.0
         version: 0.200.0(@opentelemetry/api@1.9.0)
       '@opentelemetry/exporter-trace-otlp-http':
         specifier: ^0.200.0
         version: 0.200.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/propagator-b3':
+        specifier: ^2.0.0
+        version: 2.0.0(@opentelemetry/api@1.9.0)
       '@opentelemetry/resources':
         specifier: ^2.0.0
         version: 2.0.0(@opentelemetry/api@1.9.0)
+      '@opentelemetry/sdk-logs':
+        specifier: ^0.200.0
+        version: 0.200.0(@opentelemetry/api@1.9.0)
       '@opentelemetry/sdk-metrics':
         specifier: ^2.0.0
         version: 2.0.0(@opentelemetry/api@1.9.0)

@@ -6,140 +6,222 @@
  * utilities to interact with the OpenTelemetry API.
  */
 import process from 'process';
-import { NodeSDK /*, NodeSDKConfiguration */ } from '@opentelemetry/sdk-node';
+import { NodeSDK, NodeSDKConfiguration } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { resourceFromAttributes } from '@opentelemetry/resources';
-import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
-import { createLogger } from '@mastra/core/logger';
-import { OTelInitOptions } from './types';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-proto';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
+import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
+import { CompositePropagator } from '@opentelemetry/core';
+import { B3Propagator } from '@opentelemetry/propagator-b3';
+import {
+  propagation,
+  context,
+  trace,
+  metrics,
+  Meter,
+  MeterProvider,
+  Counter,
+  Histogram,
+  Tracer,
+} from '@opentelemetry/api';
+import {
+  ParentBasedSampler,
+  TraceIdRatioBasedSampler,
+} from '@opentelemetry/sdk-trace-base';
+import { createLogger } from '@mastra/core/logger';
+import {
+  OTelInitOptions,
+  resourceFromAttributes,
+  detectResources,
+} from './types';
 
-// Configure logger for the tracing service
 const logger = createLogger({ name: 'opentelemetry-tracing', level: 'info' });
 
+let tracerInstance: Tracer | null = null;
+let meterProviderInstance: MeterProvider | null = null;
+let meterInstance: Meter | null = null;
+
 /**
- * Log with current trace context, preserving OTEL span attributes.
+ * Initialize OpenTelemetry with default settings for Mastra projects
+ * @param serviceName Name of the service (default: 'mastra-service')
+ * @param serviceVersion Version of the service (default: '1.0.0')
+ * @returns Object with tracer, meterProvider, and meter
  */
+export function initializeDefaultTracing(
+  serviceName = 'mastra-service',
+  serviceVersion = '1.0.0'
+): {
+  tracer: Tracer | null;
+  meterProvider: MeterProvider | null;
+  meter: Meter | null;
+} {
+  initOpenTelemetry({
+    serviceName,
+    serviceVersion,
+    environment: process.env.NODE_ENV || 'development',
+    enabled: process.env.OTEL_ENABLED !== 'false',
+    endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+    metricsEnabled: process.env.OTEL_METRICS_ENABLED !== 'false',
+    metricsIntervalMs: parseInt(process.env.OTEL_METRICS_INTERVAL_MS || '60000', 10),
+    samplingRatio: parseFloat(process.env.OTEL_SAMPLING_RATIO || '1.0'),
+  });
+
+  return {
+    tracer: tracerInstance,
+    meterProvider: meterProviderInstance,
+    meter: meterInstance,
+  };
+}
+
 export function logWithTraceContext(
   target: Console | Record<string, (...args: any[]) => void>,
   level: string,
   message: string,
   data?: Record<string, any>
 ): void {
-  const fn = (target as any)[level];
-  if (typeof fn === "function") {
-    fn.call(target, message, data ?? {});
-  } else if (typeof (target as any).info === "function") {
-    // fallback to 'info'
-    (target as any).info(message, data ?? {});
-  } else {
-    console.log(message, data ?? {});
-  }
+  const span = trace.getSpan(context.active());
+  const traceFields = span
+    ? { trace_id: span.spanContext().traceId, span_id: span.spanContext().spanId }
+    : {};
+  const fn = (target as any)[level] ?? (target as any).info ?? console.log;
+  fn.call(target, message, { ...data, ...traceFields });
 }
 
-/**
- * Initialize OpenTelemetry SDK with auto-instrumentation for SigNoz
- * 
- * @param options - Configuration options for the OpenTelemetry SDK
- * @returns The configured SDK instance
- */
-export function initOpenTelemetry({
-  serviceName = 'deanmachines-ai',
-  serviceVersion = '1.0.0',
-  environment = 'development',
-  enabled = true,
-  endpoint,
-  metricsEnabled = true,
-  metricsIntervalMs = 60000,
-}: OTelInitOptions & { metricsEnabled?: boolean; metricsIntervalMs?: number }): NodeSDK | null {
+export function initOpenTelemetry(
+  options: OTelInitOptions & { metricsEnabled?: boolean; metricsIntervalMs?: number }
+): NodeSDK | null {
+  const {
+    serviceName = 'deanmachines-ai',
+    serviceVersion = '1.0.0',
+    environment = 'development',
+    enabled = true,
+    endpoint,
+    metricsEnabled = true,
+    metricsIntervalMs = 60000,
+    samplingRatio = 1.0,
+  } = options;
+
   if (!enabled) {
     logger.info('OpenTelemetry tracing is disabled');
+    tracerInstance = null;
+    meterProviderInstance = null;
+    meterInstance = null;
     return null;
   }
 
-  // prepare common SDK config
-  const exporterUrl = endpoint ||
-    process.env.OTEL_EXPORTER_OTLP_ENDPOINT ||
-    'http://localhost:4317/v1/traces';
-
-  const traceExporter = new OTLPTraceExporter({ url: exporterUrl });
-  const resource = resourceFromAttributes({
+  const detected = detectResources();
+  const manual = resourceFromAttributes({
     [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
     [SemanticResourceAttributes.SERVICE_VERSION]: serviceVersion,
     [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: environment,
   });
+  const resource = detected.merge(manual);
 
-  const sdkConfig: Partial<import('@opentelemetry/sdk-node').NodeSDKConfiguration> = {
+  const propagator = new CompositePropagator({
+    propagators: [new B3Propagator()],
+  });
+  propagation.setGlobalPropagator(propagator);
+
+  const sampler = new ParentBasedSampler({
+    root: new TraceIdRatioBasedSampler(samplingRatio),
+  });
+
+  const traceExporter = new OTLPTraceExporter({
+    url: endpoint || process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+  });
+
+  const metricReader =
+    metricsEnabled
+      ? new PeriodicExportingMetricReader({
+          exporter: new OTLPMetricExporter({
+            url: (endpoint || process.env.OTEL_EXPORTER_OTLP_ENDPOINT || '').replace(
+              '/v1/traces',
+              '/v1/metrics'
+            ),
+          }),
+          exportIntervalMillis: metricsIntervalMs,
+        })
+      : undefined;
+
+  const config: NodeSDKConfiguration = {
     resource,
+    sampler,
     traceExporter,
-    instrumentations: [getNodeAutoInstrumentations()],
+    instrumentations: [
+      getNodeAutoInstrumentations({
+        '@opentelemetry/instrumentation-http': {
+          ignoreIncomingRequestHook: (req: any) =>
+            req.url?.includes('/health') ?? false,
+        },
+      }),
+    ],
+    autoDetectResources: false,
+    textMapPropagator: propagator,
+    logRecordProcessors: [],
+    metricReader: metricReader as any,
+    views: [],
+    resourceDetectors: [],
+    contextManager: undefined as any,
+    logRecordProcessor: undefined as any,
+    spanLimits: undefined as any,
+    idGenerator: undefined as any,
   };
 
-  if (metricsEnabled) {
-    const metricExporter = new OTLPMetricExporter({
-      url: exporterUrl.replace('/v1/traces', '/v1/metrics'),
-    });
-    const metricReader = new PeriodicExportingMetricReader({
-      exporter: metricExporter,
-      exportIntervalMillis: metricsIntervalMs,
-    });
-    sdkConfig.metricReader = metricReader;
-    logger.info('OpenTelemetry metrics enabled');
-  }
-
-  const sdk = new NodeSDK(sdkConfig);
+  const sdk = new NodeSDK(config);
 
   try {
     sdk.start();
-    logger.info('OpenTelemetry SDK initialized successfully');
-  } catch (initError) {
-    logger.error('Error initializing OpenTelemetry SDK', {
-      error: initError instanceof Error ? initError.message : String(initError),
-    });
+    logger.info('OpenTelemetry SDK initialized');
+
+    tracerInstance = trace.getTracer(serviceName);
+    meterProviderInstance = metrics;
+    meterInstance = metrics.getMeter(serviceName + '-metrics');
+  } catch (err) {
+    logger.error('Error initializing OpenTelemetry SDK', { error: (err as Error).message });
+    tracerInstance = null;
+    meterProviderInstance = null;
+    meterInstance = null;
   }
 
   process.on('SIGTERM', async () => {
-    try {
-      await sdk.shutdown();
-      logger.info('OpenTelemetry SDK shut down successfully');
-    } catch (shutdownError) {
-      logger.error('Error shutting down OpenTelemetry SDK', {
-        error: shutdownError instanceof Error ? shutdownError.message : String(shutdownError),
-      });
-    } finally {
-      process.exit(0);
-    }
+    await sdk.shutdown();
+    logger.info('OpenTelemetry SDK shut down');
+    process.exit(0);
   });
 
   return sdk;
 }
 
-// Export SDK instance for external use
-let sdkInstance: NodeSDK | null = null;
-
-/**
- * Get the current SDK instance
- * 
- * @returns The SDK instance or null if not initialized
- */
-export function getOpenTelemetrySdk(): NodeSDK | null {
-  return sdkInstance;
+export function getTracer(): Tracer | null {
+  return tracerInstance;
 }
 
-/**
- * Initialize OpenTelemetry with default configuration
- * 
- * @returns The SDK instance
- */
-export function initializeDefaultTracing(): NodeSDK | null {
-  if (!sdkInstance) {
-    sdkInstance = initOpenTelemetry({
-      serviceName: process.env.OTEL_SERVICE_NAME || 'deanmachines-ai',
-      environment: process.env.NODE_ENV || 'development',
-      enabled: process.env.ENABLE_OPENTELEMETRY !== 'false',
-    });
-  }
-  return sdkInstance;
+export function getMeterProvider(): MeterProvider | null {
+  return meterProviderInstance;
 }
+
+export function getMeter(): Meter | null {
+  return meterInstance;
+}
+
+export function createCounter(name: string, description?: string): Counter {
+  const meter = meterInstance || metrics.getMeter('mastra-metrics');
+  return meter.createCounter(name, { description });
+}
+
+export function createHistogram(name: string, description?: string): Histogram {
+  const meter = meterInstance || metrics.getMeter('mastra-metrics');
+  return meter.createHistogram(name, { description });
+}
+
+export default {
+  init: initOpenTelemetry,
+  initializeDefaultTracing,
+  getTracer,
+  getMeterProvider,
+  getMeter,
+  logWithTraceContext,
+  createCounter,
+  createHistogram,
+};

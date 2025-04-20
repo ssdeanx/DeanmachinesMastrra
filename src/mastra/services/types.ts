@@ -8,17 +8,17 @@ import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions'
 
 // Import types and values from OpenTelemetry packages
 import * as api from '@opentelemetry/api';
-import { Resource, resourceFromAttributes, detectResources } from '@opentelemetry/resources';
+import { Resource as OTResource, resourceFromAttributes, detectResources } from '@opentelemetry/resources';
 import type { 
   SimpleSpanProcessor,
   BatchSpanProcessor,
-  SpanProcessor,
-  SpanExporter 
+  SpanProcessor
 } from '@opentelemetry/sdk-trace-base';
+import type { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import type { 
-  NodeTracerProvider
-} from '@opentelemetry/sdk-trace-node';
-import type { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+  OTLPTraceExporter 
+} from '@opentelemetry/exporter-trace-otlp-http';
+import type { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 
 // Import LangSmith types
 import type { Client as LangSmithClient } from 'langsmith';
@@ -30,11 +30,11 @@ export type {
   SpanProcessor,
   NodeTracerProvider,
   OTLPTraceExporter,
-  Resource,
-  LangSmithClient
+  LangSmithClient,
+  OTResource as ResourceType
 };
 
-// Export resource creation functions
+// Export resource creation functions and the Resource class
 export { resourceFromAttributes, detectResources };
 
 // Export SpanStatusCode directly from the API
@@ -46,6 +46,9 @@ export const SEM_RES_ATTR_SERVICE_VERSION = SemanticResourceAttributes.SERVICE_V
 export const SEM_RES_ATTR_DEPLOYMENT_ENV = SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT;
 export const SEM_RES_ATTR_SERVICE_INSTANCE_ID = SemanticResourceAttributes.SERVICE_INSTANCE_ID;
 export const SEM_RES_ATTR_SERVICE_NAMESPACE = SemanticResourceAttributes.SERVICE_NAMESPACE;
+
+// Exporting PeriodicExportingMetricReader as IMetricReader for compatibility with tracing.ts
+export type IMetricReader = PeriodicExportingMetricReader;
 
 /**
  * LangSmith configuration options

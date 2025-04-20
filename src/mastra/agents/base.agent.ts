@@ -16,9 +16,6 @@ import { initializeDefaultTracing } from "../services/tracing";
 import {
   BaseAgentConfig,
   defaultErrorHandler,
-  DEFAULT_MODEL_ID,
-  DEFAULT_MAX_TOKENS,
-  DEFAULT_MAX_CONTEXT_TOKENS,
   defaultResponseValidation,
   type ResponseHookOptions,
   createModelInstance
@@ -53,7 +50,7 @@ import * as api from "@opentelemetry/api";
 
 // ─── Initialize OpenTelemetry + SigNoz before any agent logic ─────────────────
 initializeDefaultTracing();
-const { tracer: signozTracer, meter } = initSigNoz({
+const { tracer: signozTracer, meterProvider } = initSigNoz({
   serviceName: "agent-initialization",
   export: {
     type: "otlp",
@@ -64,8 +61,8 @@ const { tracer: signozTracer, meter } = initSigNoz({
 });
 
 // create metric instruments
-const agentMeter = meter?.getMeter
-  ? meter.getMeter("agent-metrics")
+const agentMeter = meterProvider?.getMeter
+  ? meterProvider.getMeter("agent-metrics")
   : undefined;
 
 const agentCreationCounter = agentMeter?.createCounter("agent.creation.count", {
