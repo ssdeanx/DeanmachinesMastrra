@@ -84,6 +84,7 @@ import {
 import { tracingTools } from "./tracingTools";
 import { createMastraPolygonTools, TickerDetailsSchema } from "./polygon"; // Import Mastra helper for Polygon tools
 import { createMastraRedditTools, SubredditPostSchema } from "./reddit"; // Import Mastra helper for Reddit tools
+import { puppeteerTool } from "./puppeteerTool"; 
 
 // === Export all tool modules (Consider if all are needed) ===
 export * from "./e2b";
@@ -115,6 +116,7 @@ export * from "../services/tracing";
 export * from "./polygon";
 export * from "./reddit";
 export * from "./mcptool";
+export * from "./puppeteerTool";
 
 // === Configure Logger ===
 const logger = createLogger({ name: "tool-initialization", level: "info" });
@@ -508,6 +510,8 @@ extraTools.push(ensureToolOutputSchema(getMainBranchRef));
 
 // Add tracing tools to extraTools
 extraTools.push(...tracingTools);
+
+extraTools.push(ensureToolOutputSchema(puppeteerTool));
 
 // === Filter Optional Search Tools ===
 const optionalTools: Tool<any, any>[] = Object.values(

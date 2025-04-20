@@ -198,3 +198,7 @@ export function createAgentFromConfig({
 
   return agent;
 }
+
+export type { BaseAgentConfig, Agent, ResponseHookOptions };
+export { defaultErrorHandler, defaultResponseValidation };
+export { createModelInstance, createResponseHook };

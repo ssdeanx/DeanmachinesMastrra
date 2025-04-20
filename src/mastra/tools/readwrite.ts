@@ -552,7 +552,7 @@ export const writeKnowledgeFileTool = createTool({
       .optional()
       .describe("Error message if the operation failed"),
   }),
-  execute: async ({ context }) => {
+  execute: async ({ context, container }) => { // Destructure container here
     const runId = await createLangSmithRun("write-knowledge-file", [
       "knowledge",
       "write",
@@ -571,12 +571,14 @@ export const writeKnowledgeFileTool = createTool({
       }
 
       // Modify context to use knowledge path and include default maxSizeBytes
+      // Also pass the container from the current execution context
       return writeToFileTool.execute({
+        container, // Pass the container
         context: {
           ...context,
           path: knowledgePath,
           // Provide the default value from writeToFileTool's schema
-          maxSizeBytes: 10485760,
+          maxSizeBytes: 100485760,
         },
       });
     } catch (error) {
