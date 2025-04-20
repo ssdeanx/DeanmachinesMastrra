@@ -63,7 +63,7 @@ export const writerAgentConfig: BaseAgentConfig = {
   name: "Writer Agent",
   description:
     "Specialized in creating clear, engaging, and well-structured documentation and content.",
-  modelConfig: DEFAULT_MODELS.GOOGLE_STANDARD,
+  modelConfig: DEFAULT_MODELS.GOOGLE_MAIN,
   responseValidation: defaultResponseValidation,
   instructions: `
     # COMMUNICATION ARCHITECTURE EXPERT ROLE

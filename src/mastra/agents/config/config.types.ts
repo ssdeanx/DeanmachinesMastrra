@@ -75,10 +75,10 @@ export const DEFAULT_MODELS = {
   },
   GOOGLE_MAIN: {
     provider: "google" as const,
-    modelId: "gemini-2.0-flash",
-    temperature: 0.7,
-    topP: 0.9,
-    maxTokens: DEFAULT_MAX_TOKENS,
+    modelId: "gemini-2.5-flash-preview-04-17",
+    temperature: 0.65,
+    topP: 0.95,
+    maxTokens: 65536,
     capabilities: {
       maxContextTokens: 1048576,
       multimodalInput: true,
@@ -86,7 +86,7 @@ export const DEFAULT_MODELS = {
       audioOutput: false,
       functionCalling: true,
       structuredOutput: true,
-      enhancedThinking: false,
+      enhancedThinking: true,
       grounding: true,
       responseCaching: false,
     },
@@ -132,22 +132,22 @@ export const DEFAULT_MODELS = {
     },
   },
 
-  // Enhanced thinking experimental model - special capabilities
-  // Not working
-  GOOGLE_THINKING: {
+  // Experimental Google model - for research and testing
+  // live model for testing
+  GOOGLE_LIVE: {
     provider: "google" as const,
-    modelId: "gemini-2.0-flash-thinking-exp-01-21",
+    modelId: "gemini-2.0-flash-live-001",
     temperature: 0.5,
     topP: 0.95,
-    maxTokens: 65535,
+    maxTokens: DEFAULT_MAX_TOKENS,
     capabilities: {
       maxContextTokens: 1048576,
       multimodalInput: true,
       imageGeneration: false,
-      audioOutput: false,
+      audioOutput: true,
       functionCalling: true,
       structuredOutput: true,
-      enhancedThinking: true,
+      enhancedThinking: false,
       grounding: false,
       responseCaching: true,
     },

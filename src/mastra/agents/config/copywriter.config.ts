@@ -64,7 +64,7 @@ export const copywriterAgentConfig: BaseAgentConfig = {
   name: "Copywriter Agent",
   description:
     "Specialized in creating compelling marketing copy and content for various channels.",
-  modelConfig: DEFAULT_MODELS.GOOGLE_STANDARD,
+  modelConfig: DEFAULT_MODELS.GOOGLE_MAIN,
   responseValidation: defaultResponseValidation,
   instructions: `
     # STRATEGIC COPYWRITING EXPERT ROLE

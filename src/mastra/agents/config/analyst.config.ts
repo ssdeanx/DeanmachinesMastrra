@@ -63,7 +63,7 @@ export const analystAgentConfig: BaseAgentConfig = {
   name: "Analyst Agent",
   description:
     "Specialized in interpreting data, identifying patterns, and extracting meaningful insights from information.",
-  modelConfig: DEFAULT_MODELS.GOOGLE_STANDARD,
+  modelConfig: DEFAULT_MODELS.GOOGLE_MAIN,
   responseValidation: defaultResponseValidation,
   instructions: `
     # ANALYTICAL EXPERT ROLE

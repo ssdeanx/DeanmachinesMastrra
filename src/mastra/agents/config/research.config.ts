@@ -64,7 +64,7 @@ export const researchAgentConfig: BaseAgentConfig = {
   name: "Research Agent",
   description:
     "Specialized in finding, gathering, and synthesizing information from various sources.",
-  modelConfig: DEFAULT_MODELS.GOOGLE_STANDARD,
+  modelConfig: DEFAULT_MODELS.GOOGLE_MAIN,
   responseValidation: defaultResponseValidation,
   instructions: `
     # RESEARCH AGENT ROLE

@@ -63,7 +63,7 @@ export const architectConfig: BaseAgentConfig = {
   name: "Architecture Agent",
   description:
     "Specializes in system design, architecture decisions, and technical planning",
-  modelConfig: DEFAULT_MODELS.GOOGLE_STANDARD,
+  modelConfig: DEFAULT_MODELS.GOOGLE_MAIN,
   responseValidation: defaultResponseValidation,
   instructions: `
     # SYSTEM ARCHITECT ROLE

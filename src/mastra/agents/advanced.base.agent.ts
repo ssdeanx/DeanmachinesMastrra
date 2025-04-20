@@ -1,126 +1,159 @@
+/**
+ * Advanced Agent Base Implementation
+ *
+ * This module extends the base agent with advanced features like middleware,
+ * hooks, state management, and enhanced error handling.
+ */
+
 import {
   BaseAgentConfig,
-  Agent,
-  createAgentFromConfig, // Import from base agent
-} from "./base.agent";
-import { sharedMemory as defaultSharedMemory, sharedMemory } from "../database"; // Consolidate memory imports
+  defaultErrorHandler,
+  defaultResponseValidation,
+  ResponseHookOptions,
+  createModelInstance
+} from "./config/index";
+import { Agent, createAgentFromConfig } from "./base.agent";
+import { allToolsMap } from "../tools";
+import { sharedMemory as defaultSharedMemory, sharedMemory } from "../database";
 import { createLogger } from "@mastra/core/logger";
 import { createAISpan, recordMetrics } from "../services/signoz";
-import { SpanStatusCode, trace, context } from "@opentelemetry/api"; // Consolidate OTel imports
+import { SpanStatusCode } from "@opentelemetry/api";
 import { z, ZodSchema } from "zod";
 import { JSONSchema7 } from "json-schema";
-import type { CoreMessage, Message, ToolCall, ToolResult } from "ai"; // Ensure all needed types from 'ai'
-import { generateText, generateObject, GenerateTextResult, ToolSet, streamText, StreamTextResult } from "ai";
-import type * as MastraTypes from "../types"; // Import stream types
+import { Tool } from "@mastra/core/tools";
+import type { CoreMessage, Message } from "ai";
+import { generateText, generateObject } from "ai";
+import type { StreamResult, StreamOptions, AgentResponse } from "../types";
 import {
   createResponseHook,
   createStreamHooks,
-  createToolHooks,
-} from "../hooks/advanced"; // Use hooks from advanced.ts
+  createToolHooks
+} from "../hooks/advanced";
 
-const logger = createLogger({ name: "advanced.base", level: "debug" });
-
-// --- Middleware & Options Types ---
+/**
+ * Context object for middleware
+ */
 type MiddlewareContext = {
   messages: string | string[] | CoreMessage[] | Message[];
-  args?: ReturnType<typeof generateText> | ReturnType<typeof generateObject> | MastraTypes.StreamOptions;
+  args?: ReturnType<typeof generateText> | ReturnType<typeof generateObject> | StreamOptions;
   state: Record<string, any>;
-  tools: Agent["tools"];
+  tools: Record<string, Tool>;
   memory?: typeof sharedMemory;
-  agent: AdvancedAgentType; // Reference the wrapped agent type
+  agent: AdvancedAgentType;
   result?: any;
 };
 
+/**
+ * Middleware function type
+ */
 type Middleware = (context: MiddlewareContext) => Promise<void> | void;
 
+/**
+ * Options for the advanced agent
+ */
 interface AdvancedAgentOptions {
   enableTracing?: boolean;
-  // Add other potential options: retryDelayMs?: number;
 }
 
-// --- Advanced Agent Type Definition ---
-// Extends the base Agent, adding state, events, and specific generate/stream signatures
+/**
+ * Advanced Agent Type Definition
+ * Extends the base Agent, adding state, events, and specific generate/stream signatures
+ */
 type AdvancedAgentType = Omit<Agent, "generate" | "stream"> & {
   state: Record<string, any>;
   onEvent?: (event: string, payload?: any) => void;
   setState: (newState: Record<string, any>) => void;
   getState: () => Record<string, any>;
-  originalGenerate: Agent["generate"]; // Store the base agent's generate
-  originalStream?: Agent["stream"]; // Store the base agent's stream
-  // Overloaded generate method signature
-  generate: {
-    <Z extends ZodSchema | JSONSchema7 | undefined = undefined>(
-      messages: string | string[] | CoreMessage[] | Message[],
-      args?: ReturnType<typeof generateText> & { output?: never; experimental_output?: never }
-    ): Promise<ReturnType<typeof generateText>>;
-    <Z extends ZodSchema | JSONSchema7 | undefined = undefined>(
-      messages: string | string[] | CoreMessage[] | Message[],
-      args?: ReturnType<typeof generateObject> & { output?: Z; experimental_output?: never }
-    ): Promise<ReturnType<typeof generateObject>>;
-    <Z extends ZodSchema | JSONSchema7 | undefined = undefined>(
-      messages: string | string[] | CoreMessage[] | Message[],
-      args?: ReturnType<typeof generateText> & { output?: never; experimental_output?: Z }
-    ): Promise<
-      ReturnType<typeof generateText> & {
-        object: Z extends ZodSchema ? z.infer<Z> : unknown;
-      }
-    >;
-  };
-  // Stream method signature using MastraTypes
+  originalGenerate: Agent["generate"];
+  originalStream?: Agent["stream"];
+  generate: Agent["generate"];
   stream?: <T = unknown>(
     messages: string | string[] | CoreMessage[] | Message[],
-    options?: MastraTypes.StreamOptions
-  ) => Promise<MastraTypes.StreamResult<T>>;
+    options?: StreamOptions
+  ) => Promise<StreamResult<T>>;
 };
 
-// --- Middleware Runner ---
+/**
+ * Execute middleware functions in sequence
+ */
 const runMiddleware = async (middleware: Middleware[], context: MiddlewareContext) => {
   for (const fn of middleware) {
     await fn(context);
   }
 };
 
-// --- createAdvancedAgent Factory ---
+/**
+ * Create an advanced agent with enhanced capabilities
+ * 
+ * @param config - The agent configuration
+ * @param options - Advanced agent options
+ * @param memory - Memory instance to use
+ * @param onEvent - Event callback function
+ * @param onError - Error handler callback
+ * @param preHooks - Middleware to run before agent operations
+ * @param postHooks - Middleware to run after agent operations
+ * @param maxRetries - Maximum number of retry attempts
+ * @returns An advanced agent instance
+ */
 export const createAdvancedAgent = (
   config: BaseAgentConfig,
   options: AdvancedAgentOptions = {},
   memory: typeof sharedMemory = defaultSharedMemory,
   onEvent?: (event: string, payload?: any) => void,
-  onError?: (error: Error) => Promise<{ text: string }>, // Wrapper's final error handler
+  onError?: (error: Error) => Promise<{ text: string }>,
   preHooks: Middleware[] = [],
   postHooks: Middleware[] = [],
   maxRetries: number = 0
 ): AdvancedAgentType => {
-  const agentLogger = createLogger({ name: config.name || "AdvancedAgent" }); // Use specific logger instance
+  const agentLogger = createLogger({ name: config.name || "AdvancedAgent" });
   const enableTracing = options.enableTracing ?? true;
 
-  // --- Instantiate Hooks ---
+  // Initialize hooks
   const streamHooks = createStreamHooks(enableTracing);
   const toolHooksMap: Record<string, ReturnType<typeof createToolHooks>> = {};
-  if (config.tools) {
-    config.tools.forEach(tool => {
-      // Determine tool name (adjust based on actual tool definition structure)
-      const toolName = typeof tool === 'string' ? tool : (tool as any)?.name || (tool as any)?.constructor?.name;
+  
+  // Resolve tools from toolIds using allToolsMap (similar to base.agent.ts)
+  const tools: Record<string, Tool> = {};
+  const missingTools: string[] = [];
+
+  // Iterate through the toolIds in the configuration and look them up in allToolsMap
+  for (const toolId of config.toolIds || []) {
+    const tool = allToolsMap.get(toolId);
+    if (tool) {
+      tools[toolId] = tool;
+      
+      // Initialize tool hooks if needed
+      const toolName = typeof tool === 'string' ? tool : tool.id || (tool as any)?.name;
       if (toolName) {
         agentLogger.debug(`Instantiating tool hooks for: ${toolName}`);
         toolHooksMap[toolName] = createToolHooks(toolName, enableTracing);
-        // **IMPORTANT**: Tool hooks (onToolStart, onToolEnd, onToolError) created here
-        // are NOT automatically active. They must be explicitly called from within
-        // the tool execution logic, which typically resides inside the base agent's
-        // implementation or a dedicated tool execution handler. This wrapper prepares
-        // them, but the base agent needs modification or extension points to use them.
-      } else {
-        agentLogger.warn("Could not determine name for a tool to instantiate hooks.");
       }
-    });
+    } else {
+      missingTools.push(toolId);
+    }
   }
 
-  // --- Create Base Agent ---
-  // Pass undefined for onError; the wrapper handles retries and final error callback.
-  const baseAgent = createAgentFromConfig({ config, memory, onError: undefined });
+  // Check for missing tools
+  if (missingTools.length > 0) {
+    const errorMessage = `Missing required tools for agent ${config.id}: ${missingTools.join(", ")}`;
+    agentLogger.error(errorMessage);
+    throw new Error(errorMessage);
+  }
 
-  // --- Prepare Advanced Agent Wrapper ---
-  // Cast needed to add wrapper-specific properties/methods
+  // Create response hook using defaultResponseValidation from config/index.ts
+  const responseValidationOptions = config.responseValidation || defaultResponseValidation;
+  const responseHook = responseValidationOptions
+    ? createResponseHook(responseValidationOptions)
+    : undefined;
+
+  // Create the base agent using createAgentFromConfig from base.agent.ts
+  const baseAgent = createAgentFromConfig({
+    config,
+    memory,
+    onError: undefined // We'll handle errors in the wrapper
+  });
+
+  // Prepare advanced agent wrapper
   const advancedAgentBase = baseAgent as unknown as Omit<Agent, "generate" | "stream"> & {
     state: Record<string, any>;
     onEvent?: (event: string, payload?: any) => void;
@@ -130,28 +163,30 @@ export const createAdvancedAgent = (
     originalStream?: Agent["stream"];
   };
 
-  // --- Initialize Wrapper State & Methods ---
+  // Initialize wrapper state & methods
   advancedAgentBase.state = {};
   advancedAgentBase.onEvent = onEvent;
   advancedAgentBase.setState = (newState: Record<string, any>) => {
     advancedAgentBase.state = { ...advancedAgentBase.state, ...newState };
-    onEvent?.("stateChange", advancedAgentBase.state); // Optionally emit event on state change
+    onEvent?.("stateChange", advancedAgentBase.state);
   };
   advancedAgentBase.getState = () => advancedAgentBase.state;
-  // Bind original methods to the baseAgent instance
+  
+  // Store original methods
   advancedAgentBase.originalGenerate = baseAgent.generate.bind(baseAgent);
   if (baseAgent.stream) {
     advancedAgentBase.originalStream = baseAgent.stream.bind(baseAgent);
   }
 
-  // --- Wrapped generate Implementation ---
+  // Enhanced generate implementation with middleware support
   const generateImplementation = async (
     messages: string | string[] | CoreMessage[] | Message[],
-    args?: ReturnType<typeof generateText> | ReturnType<typeof generateObject>
-  ): Promise<ReturnType<typeof generateText> | ReturnType<typeof generateObject>> => {
-    const agent = advancedAgentBase as AdvancedAgentType; // Use the correctly typed agent
+    args?: any
+  ) => {
+    const agent = advancedAgentBase as AdvancedAgentType;
     const span = createAISpan(`${agent.name || "AdvancedAgent"}.generate`, { enableTracing });
-    const effectiveMaxAttempts = Math.max(1, (maxRetries >= 0 ? maxRetries : 0) + 1); // Ensure at least 1 attempt
+    const effectiveMaxAttempts = Math.max(1, (maxRetries >= 0 ? maxRetries : 0) + 1);
+    
     span.setAttributes({
       "mastra.agent.name": agent.name || "AdvancedAgent",
       "mastra.agent.model": agent.model?.modelId || "unknown",
@@ -165,35 +200,33 @@ export const createAdvancedAgent = (
     while (attempt < effectiveMaxAttempts) {
       const currentAttempt = attempt + 1;
       span.addEvent(`Attempt ${currentAttempt}/${effectiveMaxAttempts} starting.`);
-      const context: MiddlewareContext = { // Create context for this attempt
+      
+      const context: MiddlewareContext = {
         messages,
         args,
-        state: agent.getState(), // Get current state
-        tools: agent.tools,
+        state: agent.getState(),
+        tools: tools, // Use the resolved tools map
         memory: memory,
         agent: agent,
       };
 
       try {
-        await runMiddleware(preHooks, context); // Run pre-hooks
-
-        // Call the original base agent's generate method
-        const result = await agent.originalGenerate(messages, args as any); // Cast args if needed
-
+        await runMiddleware(preHooks, context);
+        const result = await agent.originalGenerate(messages, args);
+        
         // Call the advanced response hook
         createResponseHook({ agent: agent.name, enableTracing })({ result });
-
-        context.result = result; // Add result to context for post-hooks
-        await runMiddleware(postHooks, context); // Run post-hooks
-
-        // Record success metrics and events
+        
+        context.result = result;
+        await runMiddleware(postHooks, context);
+        
         recordMetrics(span, { status: "success" });
         span.setStatus({ code: SpanStatusCode.OK });
         span.addEvent("generate.success");
         agent.onEvent?.("success", { result, attempt: currentAttempt });
         span.end();
-        return result; // Return successful result
-
+        
+        return result;
       } catch (err) {
         lastError = err as Error;
         agentLogger.error(`Attempt ${currentAttempt}/${effectiveMaxAttempts} failed:`, lastError);
@@ -204,63 +237,56 @@ export const createAdvancedAgent = (
         if (attempt >= effectiveMaxAttempts) {
           span.addEvent(`All ${effectiveMaxAttempts} attempts failed.`);
           agentLogger.error(`Agent generation failed after ${effectiveMaxAttempts} attempts.`);
-          break; // Exit retry loop
+          break;
         }
-        // Optional: Implement delay before retry (e.g., using options.retryDelayMs)
-        // await new Promise(resolve => setTimeout(resolve, options.retryDelayMs || 100));
       }
     }
 
-    // --- Handle Final Error After Retries ---
-    const finalError = lastError!; // Should always have an error if loop finished without returning
+    // Handle final error after retries
+    const finalError = lastError!;
     span.setStatus({ code: SpanStatusCode.ERROR, message: finalError.message });
     recordMetrics(span, { status: "error", errorMessage: finalError.message });
     agent.onEvent?.("error", { error: finalError, attempts: effectiveMaxAttempts });
     span.end();
 
-    // Invoke the wrapper's onError handler if provided
+    // Invoke the wrapper's onError handler if provided or use defaultErrorHandler from config/index.ts
     if (onError) {
       try {
         agentLogger.warn(`Invoking onError handler for error: ${finalError.message}`);
         const errorResponse = await onError(finalError);
-
-        // --- Construct Fallback Result ---
-        // IMPORTANT: Verify this structure against the exact GenerateTextResult<ToolSet, unknown>
-        // definition in your version of the 'ai' package. Add ALL required fields.
-        const fallback: GenerateTextResult<ToolSet, unknown> = {
-          text: errorResponse.text,
-          toolCalls: [] as ToolCall[],
-          toolResults: [] as ToolResult[],
+        
+        // Return a fallback response
+        return {
+          text: errorResponse.text || `Error occurred: ${finalError.message}`,
+          toolCalls: [],
+          toolResults: [],
           finishReason: "error",
           usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-          providerMetadata: { error: finalError.message }, // Simple object for unknown
-          rawResponse: undefined,
-          logprobs: undefined,
-          warnings: [`Agent generation failed after ${effectiveMaxAttempts} attempts: ${finalError.message}`],
-          // Add other required fields like:
-          // experimental_output: undefined,
-          // steps: [],
-          // request: undefined,
-          // response: undefined,
-          // experimental_providerMetadata: undefined,
         };
-        return fallback; // Return the constructed fallback
       } catch (onErrorError) {
         agentLogger.error("Error within onError handler:", onErrorError);
-        throw onErrorError; // Re-throw error from the onError handler itself
+        throw onErrorError;
       }
     } else {
-      // If no onError handler, re-throw the final error
-      throw finalError;
+      // Use defaultErrorHandler from config/index.ts
+      const errorResponse = await defaultErrorHandler(finalError);
+      return {
+        text: errorResponse.text || `Error occurred: ${finalError.message}`,
+        toolCalls: [],
+        toolResults: [],
+        finishReason: "error",
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      };
     }
   };
 
-  // --- Wrapped stream Implementation ---
+  // Enhanced stream implementation with middleware support
   const streamImplementation = async <T = unknown>(
     messages: string | string[] | CoreMessage[] | Message[],
-    streamOptions?: MastraTypes.StreamOptions
-  ): Promise<MastraTypes.StreamResult<T>> => {
+    streamOptions?: StreamOptions
+  ): Promise<StreamResult<T>> => {
     const agent = advancedAgentBase as AdvancedAgentType;
+    
     if (!agent.originalStream) {
       throw new Error(`Agent ${agent.name || 'AdvancedAgent'} does not support streaming.`);
     }
@@ -272,104 +298,93 @@ export const createAdvancedAgent = (
       "mastra.operation.type": "stream",
     });
 
-    const context: MiddlewareContext = { // Context for stream middleware
+    const context: MiddlewareContext = {
       messages,
       args: streamOptions,
       state: agent.getState(),
-      tools: agent.tools,
+      tools: tools, // Use the resolved tools map
       memory: memory,
       agent: agent,
     };
 
-    let streamResultHolder: MastraTypes.StreamResult<T> | null = null; // To hold the result for postHooks
+    let streamResultHolder: StreamResult<T> | null = null;
 
     try {
-      await runMiddleware(preHooks, context); // Run pre-hooks
+      await runMiddleware(preHooks, context);
 
-      // Convert messages to CoreMessage[] format expected by the hook context
-      // This might duplicate logic from the base agent, consider refactoring if possible.
-      let coreMessagesForHook: CoreMessage[];
-      if (typeof messages === 'string') {
-        coreMessagesForHook = [{ role: 'user', content: messages }];
-      } else if (Array.isArray(messages) && messages.length > 0 && typeof messages[0] === 'string') {
-        coreMessagesForHook = (messages as string[]).map(content => ({ role: 'user', content }));
-      } else if (Array.isArray(messages)) {
-        // Assumes Message[] can be cast or is already CoreMessage[]
-        // A more robust conversion might be needed depending on the exact 'Message' type definition
-        coreMessagesForHook = messages as CoreMessage[];
-      } else {
-        coreMessagesForHook = []; // Handle empty or unexpected cases
+      // Filter context to ensure compatibility
+      const { context: originalContext, ...restOptions } = streamOptions || {};
+      let filteredContextForHook: Message[] | undefined = undefined;
+      
+      if (originalContext) {
+        filteredContextForHook = originalContext.filter(
+          msg => 
+            msg.role === 'system' || msg.role === 'user' || msg.role === 'assistant'
+        );
       }
 
-      await streamHooks.onStreamStart({ context: coreMessagesForHook, ...streamOptions }); // Call stream start hook
-
-      // Call the original base agent's stream method (pass original messages)
-      const streamResult = await agent.originalStream<T>(messages, streamOptions);
-      streamResultHolder = streamResult; // Store for potential use in postHooks
-      context.result = streamResult; // Add to context
-
-      // Wrap the stream iterables to inject end/error hooks and postHooks
-      const wrapStream = async function* <StreamType>(inputStream: AsyncIterable<StreamType> | undefined): AsyncIterable<StreamType> | undefined {
-        if (!inputStream) return undefined; // Handle cases where a stream might be optional
-
+      await streamHooks.onStreamStart({ context: filteredContextForHook } as any);
+      
+      // Define stream wrapper function before using it
+      const wrapStream = async function* <StreamType>(
+        inputStream: AsyncIterable<StreamType> | undefined
+      ): AsyncIterable<StreamType> | undefined {
+        if (!inputStream) return undefined;
+        
         let streamEndedSuccessfully = false;
         try {
           for await (const chunk of inputStream) {
-            yield chunk; // Yield chunks as they arrive
+            yield chunk;
           }
-          streamEndedSuccessfully = true; // Mark success if loop completes
+          streamEndedSuccessfully = true;
         } catch (streamError) {
           agentLogger.error("Error during stream iteration:", streamError);
-          await streamHooks.onStreamError(streamError as Error); // Call stream error hook
+          await streamHooks.onStreamError(streamError as Error);
           span.setStatus({ code: SpanStatusCode.ERROR, message: (streamError as Error).message });
           span.recordException(streamError as Error);
           agent.onEvent?.("stream.error", { error: streamError });
-          throw streamError; // Re-throw after handling
+          throw streamError;
         } finally {
-          // This block runs whether the stream finished successfully or threw an error
           if (streamEndedSuccessfully) {
-            // Only call end hooks and postHooks if the stream finished without error
-            await streamHooks.onStreamEnd(streamResultHolder); // Call stream end hook
-            await runMiddleware(postHooks, context); // Run post-hooks after successful stream end
+            await streamHooks.onStreamEnd(streamResultHolder);
+            await runMiddleware(postHooks, context);
             span.setStatus({ code: SpanStatusCode.OK });
             span.addEvent("stream.success");
             agent.onEvent?.("stream.success", { result: streamResultHolder });
           }
-          // Always end the span
           span.end();
         }
       };
+      
+      const streamResult = await agent.originalStream(messages, streamOptions as any);
+      streamResultHolder = streamResult as StreamResult<T>;
+      context.result = streamResult;
 
-      // Return the result with wrapped streams
+      // Wrap streams and return
       return {
-        ...streamResult,
-        textStream: await wrapStream(streamResult.textStream), // Await the generator function itself
-        // Wrap other potential streams similarly
-        partialObjectStream: await wrapStream(streamResult.partialObjectStream),
-        // toolCallStream: await wrapStream(streamResult.toolCallStream),
-        // ... etc.
+        ...streamResult as StreamResult<T>,
+        textStream: wrapStream(streamResult.textStream) ?? (async function*(): AsyncIterable<string> {yield ""})(),
+        partialObjectStream: wrapStream(streamResult.experimental_partialOutputStream as any) as AsyncIterable<object> | undefined,
       };
-
     } catch (initialError) {
-      // Handle errors during stream setup (before iteration starts)
       agentLogger.error("Error setting up stream:", initialError);
       await streamHooks.onStreamError(initialError as Error);
       span.setStatus({ code: SpanStatusCode.ERROR, message: (initialError as Error).message });
       span.recordException(initialError as Error);
       agent.onEvent?.("stream.error", { error: initialError });
-      span.end(); // End span on setup error
+      span.end();
       throw initialError;
     }
   };
 
-  // --- Construct and Return Final Agent ---
+  // Construct and return final agent
   const finalAgent: AdvancedAgentType = {
     ...advancedAgentBase,
-    generate: generateImplementation,
-    // Conditionally add stream implementation
+    generate: generateImplementation as any,
     ...(advancedAgentBase.originalStream && { stream: streamImplementation }),
   };
 
-  // Return the fully typed advanced agent
   return finalAgent;
 };
+
+export default createAdvancedAgent;
