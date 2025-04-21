@@ -1,0 +1,174 @@
+{
+  "@context": {
+    "@vocab": "http://schema.org/",
+    "agentType": "AgentType",
+    "skills": "Skill",
+    "collaborates_with": { "@type": "@id" },
+    "supervises": { "@type": "@id" },
+    "depends_on": { "@type": "@id" }
+  },
+  "entities": [
+    {
+      "id": "agenticAssistant",
+      "label": "Agentic Assistant",
+      "type": "agent",
+      "agentType": "Generalist",
+      "skills": ["reasoning", "coordination", "workflow_management"],
+      "collaborates_with": ["analystAgent", "coderAgent", "writerAgent"],
+      "created": "2024-01-15T00:00:00Z",
+      "version": "1.2"
+    },
+    {
+      "id": "analystAgent",
+      "label": "Analyst Agent",
+      "type": "agent",
+      "agentType": "Analyst",
+      "skills": ["data_analysis", "pattern_detection", "insight_generation"],
+      "supervises": ["coderAgent", "writerAgent"],
+      "collaborates_with": ["researchAgent", "dataManagerAgent"],
+      "created": "2024-01-15T00:00:00Z",
+      "version": "1.0"
+    },
+    {
+      "id": "architectAgent",
+      "label": "Architect Agent",
+      "type": "agent",
+      "agentType": "Architect",
+      "skills": ["system_design", "architecture_decision", "technical_planning"],
+      "collaborates_with": ["coderAgent", "uiUxCoderAgent"],
+      "created": "2024-01-20T00:00:00Z",
+      "version": "1.0"
+    },
+    {
+      "id": "codeDocumenterAgent",
+      "label": "Code Documenter Agent",
+      "type": "agent",
+      "agentType": "Documenter",
+      "skills": ["api_documentation", "code_commenting", "guide_generation"],
+      "collaborates_with": ["coderAgent", "writerAgent"],
+      "created": "2024-02-01T00:00:00Z",
+      "version": "1.0"
+    },
+    {
+      "id": "coderAgent",
+      "label": "Coder Agent",
+      "type": "agent",
+      "agentType": "Developer",
+      "skills": ["code_generation", "refactoring", "analysis"],
+      "collaborates_with": ["codeDocumenterAgent", "debuggerAgent", "uiUxCoderAgent"],
+      "depends_on": ["analystAgent"],
+      "created": "2024-01-18T00:00:00Z",
+      "version": "1.1"
+    },
+    {
+      "id": "copywriterAgent",
+      "label": "Copywriter Agent",
+      "type": "agent",
+      "agentType": "Copywriter",
+      "skills": ["content_creation", "marketing_copy", "brand_voice"],
+      "collaborates_with": ["writerAgent", "seoAgent", "socialMediaAgent"],
+      "created": "2024-02-10T00:00:00Z",
+      "version": "1.0"
+    },
+    {
+      "id": "dataManagerAgent",
+      "label": "Data Manager Agent",
+      "type": "agent",
+      "agentType": "DataManager",
+      "skills": ["data_organization", "file_management", "vector_db_management"],
+      "collaborates_with": ["analystAgent", "researchAgent"],
+      "created": "2024-02-12T00:00:00Z",
+      "version": "1.0"
+    },
+    {
+      "id": "debuggerAgent",
+      "label": "Debugger Agent",
+      "type": "agent",
+      "agentType": "Debugger",
+      "skills": ["bug_detection", "error_analysis", "performance_optimization"],
+      "collaborates_with": ["coderAgent"],
+      "created": "2024-01-25T00:00:00Z",
+      "version": "1.0"
+    },
+    {
+      "id": "marketResearchAgent",
+      "label": "Market Research Agent",
+      "type": "agent",
+      "agentType": "Researcher",
+      "skills": ["market_analysis", "competitive_analysis", "trend_detection"],
+      "collaborates_with": ["analystAgent", "copywriterAgent"],
+      "created": "2024-02-15T00:00:00Z",
+      "version": "1.0"
+    },
+    {
+      "id": "researchAgent",
+      "label": "Research Agent",
+      "type": "agent",
+      "agentType": "Researcher",
+      "skills": ["information_gathering", "synthesis", "web_search"],
+      "collaborates_with": ["analystAgent", "dataManagerAgent"],
+      "created": "2024-02-20T00:00:00Z",
+      "version": "1.0"
+    },
+    {
+      "id": "rlTrainerAgent",
+      "label": "RL Trainer Agent",
+      "type": "agent",
+      "agentType": "Trainer",
+      "skills": ["reinforcement_learning", "feedback_analysis", "behavior_optimization"],
+      "collaborates_with": ["analystAgent", "coderAgent"],
+      "created": "2024-02-22T00:00:00Z",
+      "version": "1.0"
+    },
+    {
+      "id": "seoAgent",
+      "label": "SEO Agent",
+      "type": "agent",
+      "agentType": "SEO",
+      "skills": ["keyword_research", "content_optimization", "ranking_improvement"],
+      "collaborates_with": ["copywriterAgent", "writerAgent"],
+      "created": "2024-02-25T00:00:00Z",
+      "version": "1.0"
+    },
+    {
+      "id": "socialMediaAgent",
+      "label": "Social Media Agent",
+      "type": "agent",
+      "agentType": "SocialMedia",
+      "skills": ["content_planning", "campaign_management", "engagement_analysis"],
+      "collaborates_with": ["copywriterAgent", "seoAgent"],
+      "created": "2024-02-28T00:00:00Z",
+      "version": "1.0"
+    },
+    {
+      "id": "uiUxCoderAgent",
+      "label": "UI/UX Coder Agent",
+      "type": "agent",
+      "agentType": "FrontendDeveloper",
+      "skills": ["ui_implementation", "responsive_design", "user_interaction"],
+      "collaborates_with": ["coderAgent", "architectAgent"],
+      "created": "2024-03-01T00:00:00Z",
+      "version": "1.0"
+    },
+    {
+      "id": "writerAgent",
+      "label": "Writer Agent",
+      "type": "agent",
+      "agentType": "Writer",
+      "skills": ["content_writing", "editing", "style_adaptation"],
+      "collaborates_with": ["analystAgent", "codeDocumenterAgent", "copywriterAgent"],
+      "created": "2024-03-05T00:00:00Z",
+      "version": "1.0"
+    }
+  ],
+  "relationships": [
+    { "source": "coderAgent", "target": "codeDocumenterAgent", "type": "collaborates_with", "since": "2024-03-01", "weight": 0.9 },
+    { "source": "analystAgent", "target": "coderAgent", "type": "supervises", "since": "2024-03-05" },
+    { "source": "agenticAssistant", "target": "analystAgent", "type": "collaborates_with", "since": "2024-03-10", "weight": 0.8 },
+    { "source": "copywriterAgent", "target": "seoAgent", "type": "collaborates_with", "since": "2024-03-11", "weight": 0.7 },
+    { "source": "researchAgent", "target": "dataManagerAgent", "type": "collaborates_with", "since": "2024-03-12" },
+    { "source": "uiUxCoderAgent", "target": "architectAgent", "type": "collaborates_with", "since": "2024-03-13" },
+    { "source": "rlTrainerAgent", "target": "analystAgent", "type": "collaborates_with", "since": "2024-03-14" },
+    { "source": "writerAgent", "target": "codeDocumenterAgent", "type": "collaborates_with", "since": "2024-03-15" }
+  ]
+}

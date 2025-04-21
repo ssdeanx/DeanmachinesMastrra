@@ -142,8 +142,9 @@ export const collectFeedbackTool = createTool({
     feedbackId: z.string().optional(),
     error: z.string().optional(),
   }),
-  execute: async ({ context }) => {
-    const span = sigNoz.createSpan("rlFeedback.collectFeedback", { tool: "collect-feedback" });
+  execute: async ({ input }) => {
+    const { agentId, interactionId, feedback } = input;
+    const span = sigNoz.createSpan("rlFeedback.collectFeedback", { tool: "collect-feedback", agentId, interactionId });
     const startTime = performance.now();
     const runId = await createLangSmithRun("collect-feedback", [
       "rl",
@@ -152,20 +153,20 @@ export const collectFeedbackTool = createTool({
 
     try {
       // Generate a unique ID for this feedback
-      const feedbackId = `feedback_${context.agentId}_${Date.now()}`;
+      const feedbackId = `feedback_${agentId}_${Date.now()}`;
 
       // Instead of using the LibSQLStore directly, use Memory API to store feedback
       // First, create or get an existing thread for the agent's RL feedback
-      const threadId = `rl_feedback_${context.agentId}`;
+      const threadId = `rl_feedback_${agentId}`;
 
       try {
         await memoryInstance.getThreadById({ threadId });
       } catch (e) {
         // Thread doesn't exist yet, create it
         await memoryInstance.createThread({
-          resourceId: context.agentId,
+          resourceId: agentId,
           threadId,
-          title: `RL Feedback for Agent ${context.agentId}`,
+          title: `RL Feedback for Agent ${agentId}`,
           metadata: {
             type: "rl_feedback_thread"
           }
@@ -174,44 +175,25 @@ export const collectFeedbackTool = createTool({
 
       // Format the feedback data as a system message
       const feedbackData = {
-        interactionId: context.interactionId,
-        feedbackType: context.feedback.type,
-        metrics: context.feedback.metrics,
-        context: context.feedback.inputContext || "",
-        response: context.feedback.outputResponse || "",
+        interactionId,
+        feedbackType: feedback.type,
+        metrics: feedback.metrics,
+        context: feedback.inputContext || "",
+        response: feedback.outputResponse || "",
         timestamp: new Date().toISOString(),
       };
 
       // Add a message to the thread with the feedback content
       // Include metadata in the content as the addMessage method doesn't support metadata directly
-      const messageContent = JSON.stringify({
-        ...feedbackData,
-        feedbackId,
-        type: "rl_feedback",
-        metrics: context.feedback.metrics
-      });
+      const messageContent = JSON.stringify({ ...feedbackData, feedbackId, type: "rl_feedback", metrics: feedback.metrics });
 
-      await memoryInstance.addMessage({
-        threadId,
-        resourceId: context.agentId, // Add the resourceId
-        role: "assistant", // Changed from "system" to "assistant" as Mastra only supports "user" or "assistant"
-        content: messageContent,
-        type: "text"
-      });
+      await memoryInstance.addMessage({ threadId, resourceId: agentId, role: "assistant", content: messageContent, type: "text" });
 
       // Mark thread as read after feedback is collected
       threadManager.markThreadAsRead(threadId);
 
       // Track in LangSmith as well if available
-      await trackFeedback(runId, {
-        score: context.feedback.metrics.quality / 10, // Normalize to 0-1
-        comment: context.feedback.metrics.comment,
-        key: `${context.feedback.type}_feedback`,
-        value: {
-          metrics: context.feedback.metrics,
-          agentId: context.agentId,
-        },
-      });
+      await trackFeedback(runId, { score: feedback.metrics.quality / 10, comment: feedback.metrics.comment, key: `${feedback.type}_feedback`, value: { metrics: feedback.metrics, agentId }, });
 
       sigNoz.recordMetrics(span, { latencyMs: performance.now() - startTime, status: "success" });
       span.end();
@@ -223,11 +205,7 @@ export const collectFeedbackTool = createTool({
       console.error("Error collecting feedback:", error);
 
       // Track failure in LangSmith
-      await trackFeedback(runId, {
-        score: 0,
-        comment: error instanceof Error ? error.message : "Unknown error",
-        key: "feedback_collection_failure",
-      });
+      await trackFeedback(runId, { score: 0, comment: error instanceof Error ? error.message : "Unknown error", key: "feedback_collection_failure", });
 
       sigNoz.recordMetrics(span, { latencyMs: performance.now() - startTime, status: "error", errorMessage: error instanceof Error ? error.message : String(error) });
       span.end();
@@ -310,7 +288,7 @@ export const analyzeFeedbackTool = createTool({
       );
 
       // Use LLM to generate insights from feedback data
-      const model = createVertexModel("models/gemini-2.0-pro");
+      const model = createVertexModel("models/gemini-2.0-flash");
 
       // Aggregate metrics
       const metrics = aggregateMetrics(sampleFeedback);
@@ -433,7 +411,7 @@ export const applyRLInsightsTool = createTool({
 
     try {
       // Use LLM to generate improved instructions based on insights
-      const model = createVertexModel("models/gemini-2.0-pro");
+      const model = createVertexModel("models/gemini-2.0-flash");
 
       const result = await generateText({
         model,
@@ -683,4 +661,3 @@ function determineTrend(
 export function getUnreadFeedbackThreads(agentId: string) {
   return threadManager.getUnreadThreadsByResource(agentId);
 }
-

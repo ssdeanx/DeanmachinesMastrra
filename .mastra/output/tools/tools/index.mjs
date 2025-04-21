@@ -29,7 +29,7 @@ import { SimpleSpanProcessor, ConsoleSpanExporter } from '@opentelemetry/sdk-tra
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { SemanticAttributes, SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
 import * as api from '@opentelemetry/api';
-import { propagation, trace, metrics } from '@opentelemetry/api';
+import { propagation, trace, metrics, context } from '@opentelemetry/api';
 import { resourceFromAttributes, detectResources } from '@opentelemetry/resources';
 import crypto, { randomUUID } from 'crypto';
 import { vertex } from '@ai-sdk/google-vertex';
@@ -43,7 +43,16 @@ import mammoth from 'mammoth';
 import Papa from 'papaparse';
 import * as cheerio from 'cheerio';
 import { FunctionTool } from 'llamaindex';
-import { XMLParser } from 'fast-xml-parser';
+import { UpstashStore } from '@mastra/upstash';
+import { Redis } from '@upstash/redis';
+import { Index } from '@upstash/vector';
+import { CompositePropagator } from '@opentelemetry/core';
+import { B3Propagator } from '@opentelemetry/propagator-b3';
+import { ParentBasedSampler, TraceIdRatioBasedSampler } from '@opentelemetry/sdk-trace-base';
+import { XMLParser, XMLBuilder } from 'fast-xml-parser';
+import YAML from 'yaml';
+import Database from 'better-sqlite3';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import defaultKy from 'ky';
 import pThrottle from 'p-throttle';
 import { Sandbox } from '@e2b/code-interpreter';
@@ -57,13 +66,11 @@ import { Langfuse } from 'langfuse';
 import { Octokit } from 'octokit';
 import { MCPConfiguration } from '@mastra/mcp';
 import { GithubIntegration } from '@mastra/github';
-import { CompositePropagator } from '@opentelemetry/core';
-import { B3Propagator } from '@opentelemetry/propagator-b3';
-import { ParentBasedSampler, TraceIdRatioBasedSampler } from '@opentelemetry/sdk-trace-base';
 import { PolygonClient } from '@agentic/polygon';
 import { RedditClient } from '@agentic/reddit';
 import puppeteer from 'puppeteer';
 import { create, all } from 'mathjs';
+import jsonld from 'jsonld';
 
 class MastraEmbeddingAdapter extends GoogleGenerativeAIEmbeddings {
   /**
@@ -125,7 +132,7 @@ function createEmbeddings(apiKey, modelName) {
   });
 }
 
-const logger$9 = createLogger({ name: "vector-query-tool", level: "info" });
+const logger$a = createLogger({ name: "vector-query-tool", level: "info" });
 const envSchema$2 = z.object({
   GOOGLE_AI_API_KEY: z.string().min(1, "Google AI API key is required"),
   PINECONE_INDEX: z.string().default("Default"),
@@ -136,7 +143,7 @@ const validatedEnv$1 = (() => {
   try {
     return envSchema$2.parse(env);
   } catch (error) {
-    logger$9.error("Environment validation failed:", { error });
+    logger$a.error("Environment validation failed:", { error });
     throw new Error(
       `Vector query tool configuration error: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -151,12 +158,12 @@ function createMastraVectorQueryTool(config = {}) {
     const dimensions = config.dimensions || validatedEnv$1.PINECONE_DIMENSION;
     const apiKey = config.apiKey || validatedEnv$1.GOOGLE_AI_API_KEY;
     const topK = config.topK || 5;
-    logger$9.info(
+    logger$a.info(
       `Creating vector query tool for ${vectorStoreName}:${indexName}`
     );
     let embeddingModel;
     if (embeddingProvider === "tiktoken") {
-      logger$9.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
+      logger$a.info(`Using tiktoken embeddings with encoding: ${tokenEncoding}`);
       const tiktokenAdapter = {
         specificationVersion: "v1",
         provider: "tiktoken",
@@ -180,7 +187,7 @@ function createMastraVectorQueryTool(config = {}) {
             }
             return { embeddings: [{ embedding }] };
           } catch (error) {
-            logger$9.error("Tiktoken embedding error:", { error });
+            logger$a.error("Tiktoken embedding error:", { error });
             throw new Error(
               `Tiktoken embedding failed: ${error instanceof Error ? error.message : String(error)}`
             );
@@ -210,7 +217,7 @@ function createMastraVectorQueryTool(config = {}) {
       };
       embeddingModel = tiktokenAdapter;
     } else {
-      logger$9.info("Using Google embeddings");
+      logger$a.info("Using Google embeddings");
       embeddingModel = createEmbeddings(
         apiKey,
         "models/gemini-embedding-exp-03-07"
@@ -238,10 +245,10 @@ function createMastraVectorQueryTool(config = {}) {
       description,
       enableFilter: config.enableFilters
     });
-    logger$9.info(`Vector query tool created: ${toolId}`);
+    logger$a.info(`Vector query tool created: ${toolId}`);
     return tool;
   } catch (error) {
-    logger$9.error("Failed to create vector query tool:", { error });
+    logger$a.error("Failed to create vector query tool:", { error });
     throw new Error(
       `Vector query tool creation failed: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -1235,13 +1242,20 @@ const editFileTool = createTool({
       let newContent;
       if (context.isRegex) {
         const regex = new RegExp(context.search, "g");
-        newContent = content.replace(regex, (match) => {
+        const contentStr = typeof content === "string" ? content : content.toString(context.encoding || "utf8");
+        newContent = contentStr.replace(regex, function(match, ...args) {
           edits++;
-          return context.replace;
+          let result = context.replace;
+          for (let i = 1; i < args.length - 1; i++) {
+            result = result.replace(new RegExp("\\$" + i, "g"), args[i - 1] ?? "");
+          }
+          result = result.replace(/\$0/g, match);
+          return result;
         });
       } else {
-        newContent = content.split(context.search).join(context.replace);
-        edits = (content.match(new RegExp(context.search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length;
+        const contentStr = typeof content === "string" ? content : content.toString(context.encoding || "utf8");
+        newContent = contentStr.split(context.search).join(context.replace);
+        edits = (contentStr.match(new RegExp(context.search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length;
       }
       await fs__default.writeFile(absolutePath, newContent, context.encoding);
       return {
@@ -1382,18 +1396,18 @@ const OTelAttributeNames = {
   ERROR_STACK: "error.stack"
 };
 
-const logger$8 = createLogger({ name: "signoz-service", level: "info" });
+const logger$9 = createLogger({ name: "signoz-service", level: "info" });
 let sdk = null;
 let tracer = null;
 let meterProvider = null;
 function initSigNoz(config = {}) {
   const isEnabled = env.MASTRA_TELEMETRY_ENABLED?.toLowerCase() === "false" ? false : config.enabled !== false;
   if (!isEnabled) {
-    logger$8.info("SigNoz tracing is disabled via config or MASTRA_TELEMETRY_ENABLED=false.");
+    logger$9.info("SigNoz tracing is disabled via config or MASTRA_TELEMETRY_ENABLED=false.");
     return { tracer: null, meterProvider: null };
   }
   if (sdk) {
-    logger$8.warn("SigNoz tracing already initialized.");
+    logger$9.warn("SigNoz tracing already initialized.");
     return { tracer: getTracer(), meterProvider: getMeterProvider() };
   }
   try {
@@ -1401,7 +1415,7 @@ function initSigNoz(config = {}) {
     const tracesEndpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT || config.export?.endpoint || "http://localhost:4318/";
     const metricsEndpoint = env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT || tracesEndpoint.replace("/v1/traces", "/v1/metrics");
     const headers = config.export?.headers || {};
-    logger$8.info(`Initializing SigNoz telemetry for service: ${serviceName}`, {
+    logger$9.info(`Initializing SigNoz telemetry for service: ${serviceName}`, {
       tracesEndpoint,
       metricsEndpoint,
       env: env.NODE_ENV || "development"
@@ -1413,7 +1427,7 @@ function initSigNoz(config = {}) {
       [SemanticResourceAttributes.HOST_NAME]: env.HOSTNAME || env.COMPUTERNAME,
       [SemanticResourceAttributes.OS_TYPE]: process.platform
     });
-    logger$8.info(`Initializing SigNoz: traces\u2192${tracesEndpoint}, metrics\u2192${metricsEndpoint}`);
+    logger$9.info(`Initializing SigNoz: traces\u2192${tracesEndpoint}, metrics\u2192${metricsEndpoint}`);
     sdk = new NodeSDK({
       resource,
       traceExporter: new OTLPTraceExporter({ url: tracesEndpoint, headers }),
@@ -1427,18 +1441,18 @@ function initSigNoz(config = {}) {
       }
     });
     sdk.start();
-    logger$8.info("SigNoz NodeSDK started");
+    logger$9.info("SigNoz NodeSDK started");
     tracer = api.trace.getTracer(`${serviceName}-tracer`);
     meterProvider = api.metrics.getMeterProvider();
     process.on("SIGTERM", () => {
-      shutdownSigNoz().then(() => logger$8.info("SigNoz shutdown complete on SIGTERM.")).catch((err) => logger$8.error("Error shutting down SigNoz on SIGTERM:", err)).finally(() => process.exit(0));
+      shutdownSigNoz().then(() => logger$9.info("SigNoz shutdown complete on SIGTERM.")).catch((err) => logger$9.error("Error shutting down SigNoz on SIGTERM:", err)).finally(() => process.exit(0));
     });
     process.on("SIGINT", () => {
-      shutdownSigNoz().then(() => logger$8.info("SigNoz shutdown complete on SIGINT.")).catch((err) => logger$8.error("Error shutting down SigNoz on SIGINT:", err)).finally(() => process.exit(0));
+      shutdownSigNoz().then(() => logger$9.info("SigNoz shutdown complete on SIGINT.")).catch((err) => logger$9.error("Error shutting down SigNoz on SIGINT:", err)).finally(() => process.exit(0));
     });
     return { tracer, meterProvider };
   } catch (error) {
-    logger$8.error("Failed to initialize SigNoz NodeSDK", {
+    logger$9.error("Failed to initialize SigNoz NodeSDK", {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : void 0
     });
@@ -1469,7 +1483,7 @@ function createAISpan(name, attributes = {}, options = {}) {
       ...options
     });
   } catch (error) {
-    logger$8.warn(`Failed to create span '${name}' - tracing likely not initialized.`, { error: error.message });
+    logger$9.warn(`Failed to create span '${name}' - tracing likely not initialized.`, { error: error.message });
     return api.trace.wrapSpanContext(api.INVALID_SPAN_CONTEXT);
   }
 }
@@ -1483,7 +1497,7 @@ function recordLlmMetrics(span, tokenInfo, latencyMs) {
       span.setAttribute(OTelAttributeNames.LATENCY_MS, latencyMs);
     }
   } catch (error) {
-    logger$8.warn("Failed to record LLM metrics on span", { error: error.message });
+    logger$9.warn("Failed to record LLM metrics on span", { error: error.message });
   }
 }
 function recordMetrics(span, metrics) {
@@ -1515,7 +1529,7 @@ function recordMetrics(span, metrics) {
       });
     }
   } catch (error) {
-    logger$8.warn("Failed to record metrics on span", { error: error.message });
+    logger$9.warn("Failed to record metrics on span", { error: error.message });
   }
 }
 function createHttpSpan(method, url, options = {}) {
@@ -1535,24 +1549,24 @@ function createHttpSpan(method, url, options = {}) {
       ...spanOptions
     });
   } catch (error) {
-    logger$8.warn(`Failed to create HTTP span for ${method} ${url}`, { error: error.message });
+    logger$9.warn(`Failed to create HTTP span for ${method} ${url}`, { error: error.message });
     return api.trace.wrapSpanContext(api.INVALID_SPAN_CONTEXT);
   }
 }
 async function shutdownSigNoz() {
   if (sdk) {
     try {
-      logger$8.info("Shutting down SigNoz NodeSDK...");
+      logger$9.info("Shutting down SigNoz NodeSDK...");
       await sdk.shutdown();
-      logger$8.info("SigNoz NodeSDK shutdown complete.");
+      logger$9.info("SigNoz NodeSDK shutdown complete.");
       sdk = null;
       tracer = null;
       meterProvider = null;
     } catch (error) {
-      logger$8.error("Error shutting down SigNoz NodeSDK", { error });
+      logger$9.error("Error shutting down SigNoz NodeSDK", { error });
     }
   } else {
-    logger$8.info("SigNoz NodeSDK not initialized or already shut down.");
+    logger$9.info("SigNoz NodeSDK not initialized or already shut down.");
   }
 }
 var signoz = {
@@ -1566,7 +1580,7 @@ var signoz = {
   shutdown: shutdownSigNoz
 };
 
-const logger$7 = createLogger({ name: "thread-manager", level: "info" });
+const logger$8 = createLogger({ name: "thread-manager", level: "info" });
 class ThreadManager {
   threads = /* @__PURE__ */ new Map();
   resourceThreads = /* @__PURE__ */ new Map();
@@ -1580,7 +1594,7 @@ class ThreadManager {
    */
   async createThread(options) {
     const span = createAISpan("thread.create", { resourceId: options.resourceId });
-    logger$7.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
+    logger$8.info("Creating thread", { resourceId: options.resourceId, metadata: options.metadata });
     const startTime = Date.now();
     let runId;
     try {
@@ -1596,7 +1610,7 @@ class ThreadManager {
         this.resourceThreads.set(options.resourceId, /* @__PURE__ */ new Set());
       }
       this.resourceThreads.get(options.resourceId)?.add(threadId);
-      logger$7.info("Thread created", { threadId, resourceId: options.resourceId });
+      logger$8.info("Thread created", { threadId, resourceId: options.resourceId });
       span.setStatus({ code: 1 });
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "success" });
       runId = await createLangSmithRun("thread.create", [options.resourceId]);
@@ -1605,7 +1619,7 @@ class ThreadManager {
     } catch (error) {
       signoz.recordMetrics(span, { latencyMs: Date.now() - startTime, status: "error", errorMessage: String(error) });
       if (runId) await trackFeedback(runId, { score: 0, comment: "Thread creation failed", value: error });
-      logger$7.error("Failed to create thread", { error });
+      logger$8.error("Failed to create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -1622,11 +1636,11 @@ class ThreadManager {
     const span = createAISpan("thread.get", { threadId });
     try {
       const thread = this.threads.get(threadId);
-      logger$7.info("Get thread", { threadId, found: !!thread });
+      logger$8.info("Get thread", { threadId, found: !!thread });
       span.setStatus({ code: 1 });
       return thread;
     } catch (error) {
-      logger$7.error("Failed to get thread", { error });
+      logger$8.error("Failed to get thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -1644,11 +1658,11 @@ class ThreadManager {
     try {
       const threadIds = this.resourceThreads.get(resourceId) || /* @__PURE__ */ new Set();
       const threads = Array.from(threadIds).map((id) => this.threads.get(id)).filter((thread) => thread !== void 0);
-      logger$7.info("Get threads by resource", { resourceId, count: threads.length });
+      logger$8.info("Get threads by resource", { resourceId, count: threads.length });
       span.setStatus({ code: 1 });
       return threads;
     } catch (error) {
-      logger$7.error("Failed to get threads by resource", { error });
+      logger$8.error("Failed to get threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -1666,16 +1680,16 @@ class ThreadManager {
     try {
       const threads = this.getThreadsByResource(resourceId);
       if (threads.length === 0) {
-        logger$7.info("No threads found for resource", { resourceId });
+        logger$8.info("No threads found for resource", { resourceId });
         span.setStatus({ code: 1 });
         return void 0;
       }
       const mostRecent = threads.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-      logger$7.info("Most recent thread", { resourceId, threadId: mostRecent.id });
+      logger$8.info("Most recent thread", { resourceId, threadId: mostRecent.id });
       span.setStatus({ code: 1 });
       return mostRecent;
     } catch (error) {
-      logger$7.error("Failed to get most recent thread", { error });
+      logger$8.error("Failed to get most recent thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       return void 0;
     } finally {
@@ -1694,16 +1708,16 @@ class ThreadManager {
     try {
       const existingThread = this.getMostRecentThread(resourceId);
       if (existingThread) {
-        logger$7.info("Found existing thread", { resourceId, threadId: existingThread.id });
+        logger$8.info("Found existing thread", { resourceId, threadId: existingThread.id });
         span.setStatus({ code: 1 });
         return existingThread;
       }
-      logger$7.info("No existing thread, creating new", { resourceId });
+      logger$8.info("No existing thread, creating new", { resourceId });
       const newThread = await this.createThread({ resourceId, metadata });
       span.setStatus({ code: 1 });
       return newThread;
     } catch (error) {
-      logger$7.error("Failed to get or create thread", { error });
+      logger$8.error("Failed to get or create thread", { error });
       span.setStatus({ code: 2, message: String(error) });
       throw error;
     } finally {
@@ -1722,11 +1736,11 @@ class ThreadManager {
       const thread = this.threads.get(threadId);
       if (thread) {
         thread.lastReadAt = date;
-        logger$7.info("Marked thread as read", { threadId, date });
+        logger$8.info("Marked thread as read", { threadId, date });
       }
       span.setStatus({ code: 1 });
     } catch (error) {
-      logger$7.error("Failed to mark thread as read", { error });
+      logger$8.error("Failed to mark thread as read", { error });
       span.setStatus({ code: 2, message: String(error) });
     } finally {
       span.end();
@@ -1745,11 +1759,11 @@ class ThreadManager {
         const lastRead = this.threadReadStatus.get(thread.id);
         return !lastRead || thread.createdAt > lastRead;
       });
-      logger$7.info("Get unread threads by resource", { resourceId, count: unread.length });
+      logger$8.info("Get unread threads by resource", { resourceId, count: unread.length });
       span.setStatus({ code: 1 });
       return unread;
     } catch (error) {
-      logger$7.error("Failed to get unread threads by resource", { error });
+      logger$8.error("Failed to get unread threads by resource", { error });
       span.setStatus({ code: 2, message: String(error) });
       return [];
     } finally {
@@ -2821,7 +2835,7 @@ const formatContentTool = createTool({
   }
 });
 
-const logger$6 = createLogger({ name: "document-tools", level: process.env.LOG_LEVEL === "debug" ? "debug" : "info" });
+const logger$7 = createLogger({ name: "document-tools", level: process.env.LOG_LEVEL === "debug" ? "debug" : "info" });
 const documentRepository = [
   {
     id: "1",
@@ -2962,19 +2976,19 @@ const extractHtmlTextTool = createTool({
     try {
       let html = context.html;
       if (!html && context.url) {
-        logger$6.info(`Fetching HTML from URL: ${context.url}`);
+        logger$7.info(`Fetching HTML from URL: ${context.url}`);
         const response = await fetch(context.url);
         if (!response.ok) throw new Error(`Failed to fetch URL: ${response.statusText}`);
         html = await response.text();
       }
       if (!html) throw new Error("No HTML content provided or fetched.");
-      logger$6.info("Extracting text from HTML using cheerio");
+      logger$7.info("Extracting text from HTML using cheerio");
       const $ = cheerio.load(html);
       const text = $("body").text();
       recordMetrics(span, { status: "success" });
       return { text };
     } catch (error) {
-      logger$6.error(`extractHtmlTextTool error: ${error instanceof Error ? error.message : String(error)}`);
+      logger$7.error(`extractHtmlTextTool error: ${error instanceof Error ? error.message : String(error)}`);
       recordMetrics(span, { status: "error", errorMessage: error instanceof Error ? error.message : String(error) });
       throw error;
     } finally {
@@ -2982,6 +2996,215 @@ const extractHtmlTextTool = createTool({
     }
   }
 });
+
+const logger$6 = createLogger({ name: "opentelemetry-tracing", level: "info" });
+function logWithTraceContext(target, level, message, data) {
+  const span = trace.getSpan(context.active());
+  const traceFields = span ? { trace_id: span.spanContext().traceId, span_id: span.spanContext().spanId } : {};
+  const fn = target[level] ?? target.info ?? console.log;
+  fn.call(target, message, { ...data, ...traceFields });
+}
+function initOpenTelemetry(options) {
+  const {
+    serviceName = "deanmachines-ai",
+    serviceVersion = "1.0.0",
+    environment = "development",
+    enabled = true,
+    endpoint,
+    metricsEnabled = true,
+    metricsIntervalMs = 6e4,
+    samplingRatio = 1
+  } = options;
+  if (!enabled) {
+    logger$6.info("OpenTelemetry tracing is disabled");
+    return null;
+  }
+  const detected = detectResources();
+  const manual = resourceFromAttributes({
+    [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
+    [SemanticResourceAttributes.SERVICE_VERSION]: serviceVersion,
+    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: environment
+  });
+  const resource = detected.merge(manual);
+  const propagator = new CompositePropagator({
+    propagators: [new B3Propagator()]
+  });
+  propagation.setGlobalPropagator(propagator);
+  const sampler = new ParentBasedSampler({
+    root: new TraceIdRatioBasedSampler(samplingRatio)
+  });
+  const traceExporter = new OTLPTraceExporter({
+    url: endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT
+  });
+  const metricReader = metricsEnabled ? new PeriodicExportingMetricReader({
+    exporter: new OTLPMetricExporter({
+      url: (endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT || "").replace(
+        "/v1/traces",
+        "/v1/metrics"
+      )
+    }),
+    exportIntervalMillis: metricsIntervalMs
+  }) : void 0;
+  const config = {
+    resource,
+    sampler,
+    traceExporter,
+    instrumentations: [
+      getNodeAutoInstrumentations({
+        "@opentelemetry/instrumentation-http": {
+          ignoreIncomingRequestHook: (req) => req.url?.includes("/health") ?? false
+        }
+      })
+    ],
+    autoDetectResources: false,
+    textMapPropagator: propagator,
+    logRecordProcessors: [],
+    metricReader,
+    views: [],
+    resourceDetectors: [],
+    contextManager: void 0,
+    logRecordProcessor: void 0,
+    spanLimits: void 0,
+    idGenerator: void 0
+  };
+  const sdk = new NodeSDK(config);
+  try {
+    sdk.start();
+    logger$6.info("OpenTelemetry SDK initialized");
+    trace.getTracer(serviceName);
+    metrics.getMeter(serviceName + "-metrics");
+  } catch (err) {
+    logger$6.error("Error initializing OpenTelemetry SDK", { error: err.message });
+  }
+  process$1.on("SIGTERM", async () => {
+    await sdk.shutdown();
+    logger$6.info("OpenTelemetry SDK shut down");
+    process$1.exit(0);
+  });
+  return sdk;
+}
+
+function traced(operation, fn) {
+  const span = signoz.createSpan(operation);
+  return fn().then((result) => {
+    span.setStatus({ code: 1 });
+    span.end();
+    return result;
+  }).catch((error) => {
+    span.setStatus({ code: 2, message: error?.message || String(error) });
+    logWithTraceContext(console, "error", `${operation} failed`, { error });
+    span.end();
+    throw error;
+  });
+}
+try {
+  new Redis({
+    url: `https://${process.env.UPSTASH_REDIS_REST_URL}` || "file:.mastra/mastra.db",
+    token: process.env.UPSTASH_REDIS_REST_TOKEN || "file:.mastra/mastra.db"
+  });
+  logWithTraceContext(console, "info", "Upstash Redis client initialized", { url: process.env.UPSTASH_REDIS_REST_URL });
+} catch (error) {
+  logWithTraceContext(console, "error", "Failed to initialize Upstash Redis client", { error });
+}
+let redisStore;
+try {
+  redisStore = new UpstashStore({
+    url: `https://${process.env.UPSTASH_REDIS_REST_URL}` || "file:.mastra/mastra.db",
+    token: process.env.UPSTASH_REDIS_REST_TOKEN || "file:.mastra/mastra.db"
+  });
+  new Memory({
+    storage: redisStore,
+    options: {
+      lastMessages: 100
+    }
+  });
+  logWithTraceContext(console, "info", "Upstash Redis memory initialized", { url: process.env.UPSTASH_REDIS_REST_URL });
+} catch (error) {
+  logWithTraceContext(console, "error", "Failed to initialize Upstash Redis memory", { error });
+}
+let upstashVector;
+try {
+  upstashVector = new Index({
+    url: process.env.UPSTASH_VECTOR_REST_URL,
+    token: process.env.UPSTASH_VECTOR_REST_TOKEN
+  });
+  logWithTraceContext(console, "info", "Upstash VectorDB initialized", { url: process.env.UPSTASH_VECTOR_REST_URL, index: process.env.UPSTASH_INDEX });
+} catch (error) {
+  logWithTraceContext(console, "error", "Failed to initialize Upstash VectorDB", { error });
+}
+async function vectorUpsert({ id, vector, metadata }) {
+  if (!upstashVector) throw new Error("Upstash VectorDB not initialized");
+  return traced("vector.upsert", () => upstashVector.upsert({ id, vector, metadata }));
+}
+async function vectorQuery({ query, topK = 5, filter, includeVectors = false, includeMetadata = true }) {
+  if (!upstashVector) throw new Error("Upstash VectorDB not initialized");
+  return traced("vector.query", () => upstashVector.query({
+    vector: query,
+    topK,
+    filter,
+    includeVectors,
+    includeMetadata
+  }));
+}
+
+function parseInput(input, format) {
+  switch (format) {
+    case "json":
+      return JSON.parse(input);
+    case "xml": {
+      const parser = new XMLParser();
+      return parser.parse(input);
+    }
+    case "yaml":
+      return YAML.parse(input);
+    case "txt":
+    case "md":
+      return input;
+    // passthrough for plain text and markdown
+    case "sqlite":
+    case "db": {
+      const db = new Database(input, { readonly: true });
+      const rows = db.prepare("SELECT * FROM memory").all();
+      db.close();
+      return rows;
+    }
+    default:
+      throw new Error(`Unsupported format: ${format}`);
+  }
+}
+function stringifyOutput(obj, format) {
+  switch (format) {
+    case "json":
+      return JSON.stringify(obj, null, 2);
+    case "xml": {
+      const builder = new XMLBuilder();
+      return builder.build(obj);
+    }
+    case "yaml":
+      return YAML.stringify(obj);
+    case "txt":
+    case "md":
+      return typeof obj === "string" ? obj : String(obj);
+    // passthrough
+    default:
+      throw new Error(`Unsupported format: ${format}`);
+  }
+}
+
+const DEFAULT_KG_PATH = path.resolve(process.cwd(), "knowledge-graph.json");
+async function createKnowledgeGraphFile(kg, filePath = DEFAULT_KG_PATH) {
+  await fs__default.writeFile(filePath, stringifyOutput(kg, "json"), "utf-8");
+  return filePath;
+}
+async function readKnowledgeGraphFile(filePath = DEFAULT_KG_PATH) {
+  const raw = await fs__default.readFile(filePath, "utf-8");
+  return parseInput(raw, "json");
+}
+function ensureKnowledgeGraphFile(filePath = DEFAULT_KG_PATH) {
+  if (!fs__default.existsSync(filePath)) {
+    fs__default.writeFileSync(filePath, stringifyOutput({ entities: [], relationships: [] }, "json"), "utf-8");
+  }
+}
 
 function createLlamaIndexTools(...aiFunctionLikeTools) {
   const fns = new AIFunctionSet(aiFunctionLikeTools);
@@ -2997,6 +3220,235 @@ function createLlamaIndexTools(...aiFunctionLikeTools) {
 function createMastraLlamaIndexTools(...aiFunctionLikeTools) {
   return createMastraTools(...aiFunctionLikeTools);
 }
+const llamaindex_query_vector_store = {
+  id: "llamaindex_query_vector_store",
+  description: "Query the LlamaIndex vector store for relevant documents given a query string.",
+  inputSchema: z.object({
+    query: z.string().describe("The query string to search for relevant documents."),
+    topK: z.number().optional().default(5).describe("Number of top results to return.")
+  }),
+  outputSchema: z.object({
+    results: z.array(z.object({
+      id: z.string(),
+      score: z.number(),
+      text: z.string()
+    })),
+    tokenCount: z.number(),
+    success: z.boolean(),
+    error: z.string().optional()
+  }),
+  execute: async ({ context }) => {
+    let tokenCount = 0;
+    try {
+      const encoder = encodingForModel("o200k_base");
+      if (!encoder) {
+        throw new Error("Missing encoding/model");
+      }
+      tokenCount = encoder.encode(typeof context.query === "string" ? context.query : JSON.stringify(context.query)).length;
+    } catch (err) {
+      return { results: [], tokenCount: 0, success: false, error: "Tokenization failed: " + (err instanceof Error ? err.message : String(err)) };
+    }
+    try {
+      const results = await vectorQuery({ query: context.query, topK: context.topK || 5 });
+      const docs = Array.isArray(results) ? results : results?.matches || [];
+      return { results: docs, tokenCount, success: true };
+    } catch (error) {
+      return { results: [], tokenCount, success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  },
+  // Dummy properties to satisfy AIFunctionLike
+  parseInput: (input) => input,
+  spec: {
+    name: "llamaindex_query_vector_store",
+    description: "Query the LlamaIndex vector store for relevant documents given a query string.",
+    parameters: zodToJsonSchema(z.object({
+      query: z.string().describe("The query string to search for relevant documents."),
+      topK: z.number().optional().default(5).describe("Number of top results to return.")
+    })),
+    // Always JSON Schema
+    type: "function",
+    strict: true
+  }
+};
+const llamaindex_add_document = {
+  id: "llamaindex_add_document",
+  description: "Add a document to the LlamaIndex vector store.",
+  inputSchema: z.object({
+    id: z.string().describe("Unique document ID."),
+    text: z.string().describe("Document text to index.")
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    error: z.string().optional()
+  }),
+  execute: async ({ context }) => {
+    let tokenCount = 0;
+    try {
+      const encoder = encodingForModel("o200k_base");
+      tokenCount = encoder.encode(context.text).length;
+    } catch (err) {
+      return { success: false, tokenCount: 0, error: "Tokenization failed: " + (err instanceof Error ? err.message : String(err)) };
+    }
+    try {
+      const vectorTool = createMastraVectorQueryTool({ embeddingProvider: "google" });
+      const embeddingResult = await vectorTool.model.doEmbed({ values: [context.text] });
+      const realVector = embeddingResult.embeddings[0].embedding;
+      await vectorUpsert({ id: context.id, vector: realVector, metadata: { text: context.text } });
+      return { success: true, tokenCount };
+    } catch (error) {
+      return { success: false, tokenCount, error: error instanceof Error ? error.message : String(error) };
+    }
+  },
+  parseInput: (input) => input,
+  spec: {
+    name: "llamaindex_add_document",
+    description: "Add a document to the LlamaIndex vector store.",
+    parameters: zodToJsonSchema(z.object({
+      id: z.string().describe("Unique document ID."),
+      text: z.string().describe("Document text to index.")
+    })),
+    // Always JSON Schema
+    type: "function",
+    strict: true
+  }
+};
+const llamaindex_delete_document = {
+  id: "llamaindex_delete_document",
+  description: "Delete a document from the LlamaIndex vector store.",
+  inputSchema: z.object({
+    id: z.string().describe("Unique document ID to delete.")
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    error: z.string().optional()
+  }),
+  execute: async ({ context }) => {
+    try {
+      const kg = await readKnowledgeGraphFile();
+      kg.entities = kg.entities.filter((e) => e.id !== context.id);
+      kg.relationships = kg.relationships.filter((r) => r.source !== context.id && r.target !== context.id);
+      await createKnowledgeGraphFile(kg);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  },
+  parseInput: (input) => input,
+  spec: {
+    name: "llamaindex_delete_document",
+    description: "Delete a document from the LlamaIndex vector store.",
+    parameters: zodToJsonSchema(z.object({
+      id: z.string().describe("Unique document ID to delete.")
+    })),
+    // Always JSON Schema
+    type: "function",
+    strict: true
+  }
+};
+const llamaindex_knowledge_graph_query = {
+  id: "llamaindex_knowledge_graph_query",
+  description: "Query the LlamaIndex knowledge graph for entities and relationships.",
+  inputSchema: z.object({
+    query: z.string().describe("The graph query (e.g., Cypher or natural language)."),
+    topK: z.number().optional().default(5).describe("Number of top entities/relations to return.")
+  }),
+  outputSchema: z.object({
+    entities: z.array(z.object({
+      id: z.string(),
+      label: z.string(),
+      type: z.string()
+    })),
+    relationships: z.array(z.object({
+      source: z.string(),
+      target: z.string(),
+      relation: z.string()
+    })),
+    success: z.boolean(),
+    error: z.string().optional()
+  }),
+  execute: async ({ context }) => {
+    ensureKnowledgeGraphFile();
+    if (context.action === "create") {
+      await createKnowledgeGraphFile({ entities: context.entities, relationships: context.relationships });
+      return { success: true };
+    } else if (context.action === "read") {
+      const kg = await readKnowledgeGraphFile();
+      return { ...kg, success: true };
+    } else if (context.action === "add_entity") {
+      const kg = await readKnowledgeGraphFile();
+      kg.entities.push(context.entity);
+      await createKnowledgeGraphFile(kg);
+      return { success: true };
+    } else if (context.action === "add_relationship") {
+      const kg = await readKnowledgeGraphFile();
+      kg.relationships.push(context.relationship);
+      await createKnowledgeGraphFile(kg);
+      return { success: true };
+    } else {
+      return { success: false, error: "Unknown knowledge graph action" };
+    }
+  },
+  parseInput: (input) => input,
+  spec: {
+    name: "llamaindex_knowledge_graph_query",
+    description: "Query the LlamaIndex knowledge graph for entities and relationships.",
+    parameters: zodToJsonSchema(z.object({
+      query: z.string().describe("The graph query (e.g., Cypher or natural language)."),
+      topK: z.number().optional().default(5).describe("Number of top entities/relations to return.")
+    })),
+    // Always JSON Schema
+    type: "function",
+    strict: true
+  }
+};
+const llamaindex_image_captioning = {
+  id: "llamaindex_image_captioning",
+  description: "Generate a caption for a given image using LlamaIndex's multimodal capabilities.",
+  inputSchema: z.object({
+    imageUrl: z.string().url().describe("URL of the image to caption.")
+  }),
+  outputSchema: z.object({
+    caption: z.string(),
+    success: z.boolean(),
+    error: z.string().optional()
+  }),
+  execute: async ({ context }) => {
+    return { caption: "", success: false, error: "Image captioning not implemented." };
+  },
+  parseInput: (input) => input,
+  spec: {
+    name: "llamaindex_image_captioning",
+    description: "Generate a caption for a given image using LlamaIndex's multimodal capabilities.",
+    parameters: zodToJsonSchema(z.object({
+      imageUrl: z.string().url().describe("URL of the image to caption.")
+    })),
+    // Always JSON Schema
+    type: "function",
+    strict: true
+  }
+};
+const llamaTools = [
+  llamaindex_query_vector_store,
+  llamaindex_add_document,
+  llamaindex_delete_document,
+  llamaindex_knowledge_graph_query,
+  llamaindex_image_captioning
+];
+for (const tool of llamaTools) {
+  tool.outputSchema = tool.outputSchema;
+}
+function makeAIFunctionLike(toolObj) {
+  const fn = (input) => toolObj.execute({ context: input });
+  fn.inputSchema = toolObj.inputSchema;
+  fn.parseInput = toolObj.parseInput;
+  fn.spec = toolObj.spec;
+  fn.execute = toolObj.execute;
+  fn.outputSchema = toolObj.outputSchema;
+  return fn;
+}
+const llamaindexTools = createMastraLlamaIndexTools(
+  ...llamaTools.map(makeAIFunctionLike)
+);
 
 function hasProp(target, key) {
   return Boolean(target) && Object.prototype.hasOwnProperty.call(target, key);
@@ -5059,87 +5511,6 @@ const summarizationEvalTool = createTool({
   }
 });
 
-const logger$3 = createLogger({ name: "opentelemetry-tracing", level: "info" });
-function initOpenTelemetry(options) {
-  const {
-    serviceName = "deanmachines-ai",
-    serviceVersion = "1.0.0",
-    environment = "development",
-    enabled = true,
-    endpoint,
-    metricsEnabled = true,
-    metricsIntervalMs = 6e4,
-    samplingRatio = 1
-  } = options;
-  if (!enabled) {
-    logger$3.info("OpenTelemetry tracing is disabled");
-    return null;
-  }
-  const detected = detectResources();
-  const manual = resourceFromAttributes({
-    [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
-    [SemanticResourceAttributes.SERVICE_VERSION]: serviceVersion,
-    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: environment
-  });
-  const resource = detected.merge(manual);
-  const propagator = new CompositePropagator({
-    propagators: [new B3Propagator()]
-  });
-  propagation.setGlobalPropagator(propagator);
-  const sampler = new ParentBasedSampler({
-    root: new TraceIdRatioBasedSampler(samplingRatio)
-  });
-  const traceExporter = new OTLPTraceExporter({
-    url: endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT
-  });
-  const metricReader = metricsEnabled ? new PeriodicExportingMetricReader({
-    exporter: new OTLPMetricExporter({
-      url: (endpoint || process$1.env.OTEL_EXPORTER_OTLP_ENDPOINT || "").replace(
-        "/v1/traces",
-        "/v1/metrics"
-      )
-    }),
-    exportIntervalMillis: metricsIntervalMs
-  }) : void 0;
-  const config = {
-    resource,
-    sampler,
-    traceExporter,
-    instrumentations: [
-      getNodeAutoInstrumentations({
-        "@opentelemetry/instrumentation-http": {
-          ignoreIncomingRequestHook: (req) => req.url?.includes("/health") ?? false
-        }
-      })
-    ],
-    autoDetectResources: false,
-    textMapPropagator: propagator,
-    logRecordProcessors: [],
-    metricReader,
-    views: [],
-    resourceDetectors: [],
-    contextManager: void 0,
-    logRecordProcessor: void 0,
-    spanLimits: void 0,
-    idGenerator: void 0
-  };
-  const sdk = new NodeSDK(config);
-  try {
-    sdk.start();
-    logger$3.info("OpenTelemetry SDK initialized");
-    trace.getTracer(serviceName);
-    metrics.getMeter(serviceName + "-metrics");
-  } catch (err) {
-    logger$3.error("Error initializing OpenTelemetry SDK", { error: err.message });
-  }
-  process$1.on("SIGTERM", async () => {
-    await sdk.shutdown();
-    logger$3.info("OpenTelemetry SDK shut down");
-    process$1.exit(0);
-  });
-  return sdk;
-}
-
 const startAISpanTool = createTool({
   id: "start-ai-span",
   description: "Start a new AI operation tracing span (SigNoz)",
@@ -5758,82 +6129,76 @@ function createMastraRedditTools() {
   return mastraTools;
 }
 
-const logger$2 = createLogger({ name: "puppeteer", level: "debug" });
-logger$2.info("Initializing Puppeteer tool for web navigation and screenshotting.");
+const logger$3 = createLogger({ name: "puppeteer", level: "debug" });
+logger$3.info("Initializing Puppeteer tool for web navigation and screenshotting.");
 const SCREENSHOT_DIR = path.resolve(process.cwd(), "puppeteer_screenshots");
-function generateScreenshotFilename(url) {
+function generateScreenshotFilename$1(url) {
   const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
   const urlHash = crypto.createHash("md5").update(url).digest("hex").substring(0, 8);
   return `screenshot_${urlHash}_${timestamp}.png`;
 }
-const ClickActionSchema = z.object({
+const ClickActionSchema$1 = z.object({
   type: z.literal("click"),
   selector: z.string().describe("CSS selector for the element to click."),
   waitForNavigation: z.boolean().optional().default(false).describe("Wait for navigation to complete after the click.")
 });
-const TypeActionSchema = z.object({
+const TypeActionSchema$1 = z.object({
   type: z.literal("type"),
   selector: z.string().describe("CSS selector for the input field."),
   text: z.string().describe("Text to type into the field."),
   delay: z.number().optional().default(50).describe("Delay between keystrokes in milliseconds.")
 });
-const ScrapeActionSchema = z.object({
+const ScrapeActionSchema$1 = z.object({
   type: z.literal("scrape"),
   selector: z.string().describe("CSS selector for the element(s) to scrape."),
   attribute: z.string().optional().describe("Optional attribute to extract (e.g., 'href', 'src'). If omitted, extracts text content."),
   multiple: z.boolean().optional().default(false).describe("Whether to scrape multiple matching elements.")
 });
-const WaitForSelectorActionSchema = z.object({
+const WaitForSelectorActionSchema$1 = z.object({
   type: z.literal("waitForSelector"),
   selector: z.string().describe("CSS selector to wait for."),
   timeout: z.number().optional().default(3e4).describe("Maximum time to wait in milliseconds.")
 });
-const ScrollActionSchema = z.object({
+const ScrollActionSchema$1 = z.object({
   type: z.literal("scroll"),
   direction: z.enum(["down", "up", "bottom", "top"]).describe("Direction to scroll."),
   amount: z.number().optional().describe("Pixel amount to scroll (for 'down'/'up'). Defaults to window height/width."),
   selector: z.string().optional().describe("Optional selector to scroll within or to.")
   // Scroll within an element or scroll element into view
 });
-const HoverActionSchema = z.object({
+const HoverActionSchema$1 = z.object({
   type: z.literal("hover"),
   selector: z.string().describe("CSS selector for the element to hover over.")
 });
-const SelectActionSchema = z.object({
+const SelectActionSchema$1 = z.object({
   type: z.literal("select"),
   selector: z.string().describe("CSS selector for the <select> element."),
   value: z.string().describe("The value of the <option> to select.")
 });
-const WaitActionSchema = z.object({
+const WaitActionSchema$1 = z.object({
   type: z.literal("wait"),
   duration: z.number().int().min(1).describe("Duration to wait in milliseconds.")
 });
-const EvaluateActionSchema = z.object({
+const EvaluateActionSchema$1 = z.object({
   type: z.literal("evaluate"),
   script: z.string().describe("JavaScript code to execute in the page context. Use 'return' to output data.")
 });
-const ActionSchema = z.discriminatedUnion("type", [
-  ClickActionSchema,
-  TypeActionSchema,
-  ScrapeActionSchema,
-  WaitForSelectorActionSchema,
-  ScrollActionSchema,
-  HoverActionSchema,
-  SelectActionSchema,
-  WaitActionSchema,
-  EvaluateActionSchema
+const ActionSchema$1 = z.discriminatedUnion("type", [
+  ClickActionSchema$1,
+  TypeActionSchema$1,
+  ScrapeActionSchema$1,
+  WaitForSelectorActionSchema$1,
+  ScrollActionSchema$1,
+  HoverActionSchema$1,
+  SelectActionSchema$1,
+  WaitActionSchema$1,
+  EvaluateActionSchema$1
 ]);
 const PuppeteerOutputSchema = z.object({
   url: z.string().url().describe("The final URL after navigation and actions."),
   pageTitle: z.string().optional().describe("The title of the web page after actions."),
   scrapedData: z.array(z.any()).optional().describe("Data scraped or returned by evaluate actions."),
   screenshotPath: z.string().optional().describe("Absolute path to the saved screenshot file, if taken."),
-  // --- Updated fields for knowledge save status ---
-  knowledgeSavePath: z.string().optional().describe("Full path where scraped data was saved in the knowledge base, if requested."),
-  // Renamed
-  saveSuccess: z.boolean().optional().describe("Indicates if saving scraped data to knowledge base was successful."),
-  saveError: z.string().optional().describe("Error message if saving scraped data to knowledge base failed."),
-  // --- End updated fields ---
   success: z.boolean().describe("Whether the overall operation was successful."),
   error: z.string().optional().describe("Error message if the operation failed.")
 });
@@ -5841,13 +6206,7 @@ const PuppeteerInputSchema = z.object({
   url: z.string().url().describe("The initial URL of the web page to navigate to."),
   screenshot: z.boolean().optional().default(false).describe("Whether to take a full-page screenshot at the end."),
   initialWaitForSelector: z.string().optional().describe("A CSS selector to wait for after initial navigation."),
-  actions: z.array(ActionSchema).optional().describe("A sequence of actions to perform on the page."),
-  // --- Fields for saving to knowledge base ---
-  saveKnowledgeFilename: z.string().optional().describe("Optional filename (e.g., 'scraped_results.json') to save scraped data within the knowledge base."),
-  saveFormat: z.enum(["json", "csv"]).optional().default("json").describe("Format to save the scraped data (default: json)."),
-  saveMode: z.nativeEnum(FileWriteMode).optional().default(FileWriteMode.OVERWRITE).describe("Write mode for saving data (overwrite, append, create-new)."),
-  saveEncoding: z.nativeEnum(FileEncoding).optional().default(FileEncoding.UTF8).describe("Encoding for saving data.")
-  // --- End fields ---
+  actions: z.array(ActionSchema$1).optional().describe("A sequence of actions to perform on the page.")
 });
 const puppeteerTool = createTool({
   id: "puppeteer_web_automator",
@@ -5855,13 +6214,12 @@ const puppeteerTool = createTool({
   inputSchema: PuppeteerInputSchema,
   outputSchema: PuppeteerOutputSchema,
   execute: async (executionContext) => {
-    const { context: input, container } = executionContext;
+    const { context: input} = executionContext;
     const span = createAISpan("puppeteer_tool_execution", {
       "tool.id": "puppeteer_web_automator",
       "input.url": input.url,
       "input.actions_count": input.actions?.length ?? 0,
-      "input.screenshot_requested": input.screenshot ?? false,
-      "input.save_requested": !!input.saveKnowledgeFilename
+      "input.screenshot_requested": input.screenshot ?? false
     });
     let browser = null;
     const output = {
@@ -5871,58 +6229,58 @@ const puppeteerTool = createTool({
     };
     const startTime = Date.now();
     try {
-      logger$2.info(`Starting Puppeteer automation for URL: ${input.url}`);
+      logger$3.info(`Starting Puppeteer automation for URL: ${input.url}`);
       span.addEvent("Automation started", { url: input.url });
       if (input.screenshot) {
         await fs__default.ensureDir(SCREENSHOT_DIR);
-        logger$2.debug(`Ensured screenshot directory exists: ${SCREENSHOT_DIR}`);
+        logger$3.debug(`Ensured screenshot directory exists: ${SCREENSHOT_DIR}`);
       }
       browser = await puppeteer.launch({
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox"]
       });
-      logger$2.debug("Puppeteer browser launched.");
+      logger$3.debug("Puppeteer browser launched.");
       const page = await browser.newPage();
-      logger$2.debug("New page created.");
+      logger$3.debug("New page created.");
       await page.setViewport({ width: 1280, height: 800 });
-      logger$2.debug("Viewport set.");
-      logger$2.info(`Navigating to ${input.url}...`);
+      logger$3.debug("Viewport set.");
+      logger$3.info(`Navigating to ${input.url}...`);
       await page.goto(input.url, { waitUntil: "networkidle2", timeout: 6e4 });
       output.url = page.url();
       span.setAttribute("navigation.final_url", output.url);
-      logger$2.info(`Navigation complete. Current URL: ${output.url}`);
+      logger$3.info(`Navigation complete. Current URL: ${output.url}`);
       if (input.initialWaitForSelector) {
-        logger$2.info(`Waiting for initial selector: ${input.initialWaitForSelector}`);
+        logger$3.info(`Waiting for initial selector: ${input.initialWaitForSelector}`);
         await page.waitForSelector(input.initialWaitForSelector, { timeout: 3e4 });
-        logger$2.debug(`Initial selector found: ${input.initialWaitForSelector}`);
+        logger$3.debug(`Initial selector found: ${input.initialWaitForSelector}`);
       }
       if (input.actions && input.actions.length > 0) {
-        logger$2.info(`Executing ${input.actions.length} actions...`);
+        logger$3.info(`Executing ${input.actions.length} actions...`);
         span.addEvent("Executing actions", { count: input.actions.length });
         for (const [index, action] of input.actions.entries()) {
-          logger$2.debug(`Executing action ${index + 1}: ${action.type}`);
+          logger$3.debug(`Executing action ${index + 1}: ${action.type}`);
           try {
             switch (action.type) {
               case "click":
-                logger$2.info(`Clicking element: ${action.selector}`);
+                logger$3.info(`Clicking element: ${action.selector}`);
                 const clickPromise = page.click(action.selector);
                 if (action.waitForNavigation) {
-                  logger$2.debug("Waiting for navigation after click...");
+                  logger$3.debug("Waiting for navigation after click...");
                   await Promise.all([clickPromise, page.waitForNavigation({ waitUntil: "networkidle2", timeout: 6e4 })]);
                   output.url = page.url();
-                  logger$2.info(`Navigation after click complete. New URL: ${output.url}`);
+                  logger$3.info(`Navigation after click complete. New URL: ${output.url}`);
                 } else {
                   await clickPromise;
                 }
-                logger$2.debug(`Clicked element: ${action.selector}`);
+                logger$3.debug(`Clicked element: ${action.selector}`);
                 break;
               case "type":
-                logger$2.info(`Typing into element: ${action.selector}`);
+                logger$3.info(`Typing into element: ${action.selector}`);
                 await page.type(action.selector, action.text, { delay: action.delay });
-                logger$2.debug(`Typed text into: ${action.selector}`);
+                logger$3.debug(`Typed text into: ${action.selector}`);
                 break;
               case "scrape":
-                logger$2.info(`Scraping element(s): ${action.selector}` + (action.attribute ? ` [Attribute: ${action.attribute}]` : " [Text Content]"));
+                logger$3.info(`Scraping element(s): ${action.selector}` + (action.attribute ? ` [Attribute: ${action.attribute}]` : " [Text Content]"));
                 let scrapedItems = [];
                 if (action.multiple) {
                   scrapedItems = await page.$$eval(
@@ -5941,15 +6299,15 @@ const puppeteerTool = createTool({
                   }
                 }
                 output.scrapedData = [...output.scrapedData ?? [], ...scrapedItems];
-                logger$2.debug(`Scraped ${scrapedItems.length} items. Total scraped: ${output.scrapedData?.length}`);
+                logger$3.debug(`Scraped ${scrapedItems.length} items. Total scraped: ${output.scrapedData?.length}`);
                 break;
               case "waitForSelector":
-                logger$2.info(`Waiting for selector: ${action.selector} (Timeout: ${action.timeout}ms)`);
+                logger$3.info(`Waiting for selector: ${action.selector} (Timeout: ${action.timeout}ms)`);
                 await page.waitForSelector(action.selector, { timeout: action.timeout });
-                logger$2.debug(`Selector found: ${action.selector}`);
+                logger$3.debug(`Selector found: ${action.selector}`);
                 break;
               case "scroll":
-                logger$2.info(`Scrolling ${action.direction}` + (action.selector ? ` within/to ${action.selector}` : " window"));
+                logger$3.info(`Scrolling ${action.direction}` + (action.selector ? ` within/to ${action.selector}` : " window"));
                 await page.evaluate(async (options) => {
                   const element = options.selector ? document.querySelector(options.selector) : window;
                   if (!element) throw new Error(`Scroll target not found: ${options.selector}`);
@@ -5979,110 +6337,56 @@ const puppeteerTool = createTool({
                   }
                   await new Promise((resolve) => setTimeout(resolve, 100));
                 }, action);
-                logger$2.debug(`Scrolled ${action.direction}.`);
+                logger$3.debug(`Scrolled ${action.direction}.`);
                 break;
               case "hover":
-                logger$2.info(`Hovering over element: ${action.selector}`);
+                logger$3.info(`Hovering over element: ${action.selector}`);
                 await page.hover(action.selector);
-                logger$2.debug(`Hovered over: ${action.selector}`);
+                logger$3.debug(`Hovered over: ${action.selector}`);
                 break;
               case "select":
-                logger$2.info(`Selecting option [value=${action.value}] in dropdown: ${action.selector}`);
+                logger$3.info(`Selecting option [value=${action.value}] in dropdown: ${action.selector}`);
                 await page.select(action.selector, action.value);
-                logger$2.debug(`Selected option in: ${action.selector}`);
+                logger$3.debug(`Selected option in: ${action.selector}`);
                 break;
               case "wait":
-                logger$2.info(`Waiting for ${action.duration}ms`);
+                logger$3.info(`Waiting for ${action.duration}ms`);
                 await new Promise((resolve) => setTimeout(resolve, action.duration));
-                logger$2.debug("Wait complete.");
+                logger$3.debug("Wait complete.");
                 break;
               case "evaluate":
-                logger$2.info(`Evaluating script...`);
+                logger$3.info(`Evaluating script...`);
                 const result = await page.evaluate(action.script);
                 if (result !== void 0) {
                   output.scrapedData = [...output.scrapedData ?? [], result];
-                  logger$2.debug(`Script evaluated. Result added to scrapedData. Total scraped: ${output.scrapedData?.length}`);
+                  logger$3.debug(`Script evaluated. Result added to scrapedData. Total scraped: ${output.scrapedData?.length}`);
                 } else {
-                  logger$2.debug(`Script evaluated. No return value.`);
+                  logger$3.debug(`Script evaluated. No return value.`);
                 }
                 break;
               default:
-                const _exhaustiveCheck = action;
-                logger$2.error("Unsupported action type encountered", { action: _exhaustiveCheck });
-                throw new Error(`Unsupported action type encountered: ${JSON.stringify(_exhaustiveCheck)}`);
+                logger$3.error("Unsupported action type encountered", { action });
+                throw new Error(`Unsupported action type encountered: ${JSON.stringify(action)}`);
             }
           } catch (actionError) {
             const errorMsg = `Error during action ${index + 1} (${action.type}): ${actionError.message}`;
-            logger$2.error(errorMsg, actionError);
+            logger$3.error(errorMsg, actionError);
             throw new Error(errorMsg);
           }
         }
-        logger$2.info("All actions executed.");
+        logger$3.info("All actions executed.");
         span.addEvent("Actions completed");
       }
       output.pageTitle = await page.title();
-      logger$2.debug(`Final page title: ${output.pageTitle}`);
+      logger$3.debug(`Final page title: ${output.pageTitle}`);
       if (input.screenshot) {
-        const filename = generateScreenshotFilename(output.url);
+        const filename = generateScreenshotFilename$1(output.url);
         const screenshotPath = path.join(SCREENSHOT_DIR, filename);
         await page.screenshot({ path: screenshotPath, fullPage: true });
         output.screenshotPath = screenshotPath;
       }
-      if (input.saveKnowledgeFilename && output.scrapedData && output.scrapedData.length > 0) {
-        span.addEvent("Saving scraped data", { filename: input.saveKnowledgeFilename, count: output.scrapedData.length });
-        let contentToSave = "";
-        try {
-          if (input.saveFormat === "json") {
-            contentToSave = JSON.stringify(output.scrapedData, null, 2);
-          } else if (input.saveFormat === "csv") {
-            if (output.scrapedData.every((item) => typeof item === "object" && item !== null)) {
-              const headers = Object.keys(output.scrapedData[0]).join(",");
-              const rows = output.scrapedData.map(
-                (item) => Object.values(item).map((val) => JSON.stringify(val)).join(",")
-              );
-              contentToSave = `${headers}
-${rows.join("\n")}`;
-            } else {
-              throw new Error("CSV format requires scraped data to be an array of objects.");
-            }
-          } else {
-            throw new Error(`Unsupported save format: ${input.saveFormat}`);
-          }
-          if (!writeKnowledgeFileTool?.execute) {
-            throw new Error("writeKnowledgeFileTool.execute is not defined or tool not imported correctly.");
-          }
-          const writeResult = await writeKnowledgeFileTool.execute({
-            context: {
-              path: input.saveKnowledgeFilename,
-              content: contentToSave,
-              mode: input.saveMode,
-              encoding: input.saveEncoding,
-              createDirectory: true
-            },
-            container
-          });
-          if (writeResult.success) {
-            span.setAttribute("output.save_path", writeResult.metadata.path);
-            span.addEvent("Save successful");
-            output.knowledgeSavePath = writeResult.metadata.path;
-            output.saveSuccess = true;
-            logger$2.info(`Successfully saved scraped data to knowledge base: ${output.knowledgeSavePath}`);
-          } else {
-            span.addEvent("Save failed", { error: output.saveError });
-            output.saveSuccess = false;
-            output.saveError = writeResult.error || "Unknown error saving to knowledge base.";
-            logger$2.error(`Failed to save scraped data to knowledge base: ${output.saveError}`);
-          }
-        } catch (saveError) {
-          output.saveSuccess = false;
-          output.saveError = saveError instanceof Error ? saveError.message : String(saveError);
-          logger$2.error(`Error preparing or saving scraped data to knowledge base: ${output.saveError}`);
-        }
-      } else if (input.saveKnowledgeFilename) {
-        logger$2.warn(`Knowledge base filename provided (${input.saveKnowledgeFilename}), but no scraped data to save.`);
-      }
       output.success = true;
-      logger$2.info("Puppeteer automation completed successfully.");
+      logger$3.info("Puppeteer automation completed successfully.");
       span.setAttribute("output.scraped_count", output.scrapedData?.length ?? 0);
       recordMetrics(span, {
         status: "success",
@@ -6090,7 +6394,7 @@ ${rows.join("\n")}`;
         // 'output.scraped_count' is now a span attribute, not a metric
       });
     } catch (error) {
-      logger$2.error(`Puppeteer tool error: ${error.message}`, error);
+      logger$3.error(`Puppeteer tool error: ${error.message}`, error);
       output.error = error instanceof Error ? error.message : String(error);
       output.success = false;
       recordMetrics(span, {
@@ -6102,7 +6406,7 @@ ${rows.join("\n")}`;
     } finally {
       if (browser) {
         await browser.close();
-        logger$2.info("Browser closed.");
+        logger$3.info("Browser closed.");
         span.addEvent("Browser closed");
       }
       span.end();
@@ -6158,7 +6462,7 @@ const calculatorTool = createTool({
   }
 });
 
-const logger$1 = createLogger({ name: "llm-chain-tool", level: "info" });
+const logger$2 = createLogger({ name: "llm-chain-tool", level: "info" });
 function createAiSdkModel(config = {}) {
   switch (config.provider || "google") {
     case "openai": {
@@ -6281,7 +6585,7 @@ const llmChainTool = createAIFunction(
   }
 );
 console.log("llmChainTool:", llmChainTool);
-logger$1.info("Registered llmChainTool", { tool: llmChainTool });
+logger$2.info("Registered llmChainTool", { tool: llmChainTool });
 const aiSdkPromptInputSchema = z.object({
   prompt: z.string().describe("The prompt to send to the model"),
   provider: z.enum(["openai", "google", "anthropic"]).optional().describe("LLM provider to use"),
@@ -6554,6 +6858,277 @@ function createMastraLLMChainTools() {
   }
   return mastraTools;
 }
+
+const logger$1 = createLogger({ name: "puppeteerScrape", level: "debug" });
+function generateScreenshotFilename(url) {
+  const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+  const urlHash = crypto.createHash("md5").update(url).digest("hex").substring(0, 8);
+  return `screenshot_${urlHash}_${timestamp}.png`;
+}
+const ClickActionSchema = z.object({
+  type: z.literal("click"),
+  selector: z.string(),
+  waitForNavigation: z.boolean().optional().default(false)
+});
+const TypeActionSchema = z.object({
+  type: z.literal("type"),
+  selector: z.string(),
+  text: z.string(),
+  delay: z.number().optional().default(50)
+});
+const ScrapeActionSchema = z.object({
+  type: z.literal("scrape"),
+  selector: z.string(),
+  attribute: z.string().optional(),
+  multiple: z.boolean().optional().default(false)
+});
+const WaitForSelectorActionSchema = z.object({
+  type: z.literal("waitForSelector"),
+  selector: z.string(),
+  timeout: z.number().optional().default(3e4)
+});
+const ScrollActionSchema = z.object({
+  type: z.literal("scroll"),
+  direction: z.enum(["down", "up", "bottom", "top"]),
+  amount: z.number().optional(),
+  selector: z.string().optional()
+});
+const HoverActionSchema = z.object({
+  type: z.literal("hover"),
+  selector: z.string()
+});
+const SelectActionSchema = z.object({
+  type: z.literal("select"),
+  selector: z.string(),
+  value: z.string()
+});
+const WaitActionSchema = z.object({
+  type: z.literal("wait"),
+  duration: z.number().int().min(1)
+});
+const EvaluateActionSchema = z.object({
+  type: z.literal("evaluate"),
+  script: z.string()
+});
+const ActionSchema = z.discriminatedUnion("type", [
+  ClickActionSchema,
+  TypeActionSchema,
+  ScrapeActionSchema,
+  WaitForSelectorActionSchema,
+  ScrollActionSchema,
+  HoverActionSchema,
+  SelectActionSchema,
+  WaitActionSchema,
+  EvaluateActionSchema
+]);
+const PuppeteerScrapeOutputSchema = z.object({
+  url: z.string().url(),
+  pageTitle: z.string().optional(),
+  scrapedData: z.array(z.any()).optional(),
+  screenshotPath: z.string().optional(),
+  success: z.boolean(),
+  error: z.string().optional()
+});
+const PuppeteerScrapeInputSchema = z.object({
+  url: z.string().url(),
+  screenshot: z.boolean().optional().default(false),
+  initialWaitForSelector: z.string().optional(),
+  actions: z.array(ActionSchema).optional()
+});
+const puppeteerScrapeTool = createTool({
+  id: "puppeteer_scrape",
+  description: "Navigates to a web page using Puppeteer, performs actions (click, type, scrape, wait), and returns scraped data (no file writing).",
+  inputSchema: PuppeteerScrapeInputSchema,
+  outputSchema: PuppeteerScrapeOutputSchema,
+  execute: async ({ context }) => {
+    let browser = null;
+    const output = {
+      url: context.url,
+      success: false,
+      scrapedData: []
+    };
+    try {
+      browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1280, height: 800 });
+      await page.goto(context.url, { waitUntil: "networkidle2", timeout: 6e4 });
+      output.url = page.url();
+      output.pageTitle = await page.title();
+      if (context.initialWaitForSelector) {
+        await page.waitForSelector(context.initialWaitForSelector, { timeout: 3e4 });
+      }
+      if (context.actions && context.actions.length > 0) {
+        for (const action of context.actions) {
+          switch (action.type) {
+            case "click":
+              const clickPromise = page.click(action.selector);
+              if (action.waitForNavigation) {
+                await Promise.all([clickPromise, page.waitForNavigation({ waitUntil: "networkidle2", timeout: 6e4 })]);
+                output.url = page.url();
+              } else {
+                await clickPromise;
+              }
+              break;
+            case "type":
+              await page.type(action.selector, action.text, { delay: action.delay });
+              break;
+            case "scrape":
+              let scrapedItems = [];
+              if (action.multiple) {
+                scrapedItems = await page.$$eval(
+                  action.selector,
+                  (elements, attr) => elements.map((el) => attr ? el.getAttribute(attr) : el.textContent?.trim() ?? null),
+                  action.attribute
+                );
+              } else {
+                const scrapedItem = await page.$eval(
+                  action.selector,
+                  (element, attr) => attr ? element.getAttribute(attr) : element.textContent?.trim() ?? null,
+                  action.attribute
+                ).catch(() => null);
+                if (scrapedItem !== null) scrapedItems = [scrapedItem];
+              }
+              output.scrapedData = [...output.scrapedData ?? [], ...scrapedItems];
+              break;
+            case "waitForSelector":
+              await page.waitForSelector(action.selector, { timeout: action.timeout });
+              break;
+            case "scroll":
+              await page.evaluate(async (options) => {
+                const { direction, amount, selector } = options;
+                let target = selector ? document.querySelector(selector) : window;
+                if (!target) return;
+                if (direction === "down" || direction === "up") {
+                  const scrollAmount = amount || window.innerHeight;
+                  if (direction === "down") {
+                    target.scrollBy ? target.scrollBy(0, scrollAmount) : window.scrollBy(0, scrollAmount);
+                  } else {
+                    target.scrollBy ? target.scrollBy(0, -scrollAmount) : window.scrollBy(0, -scrollAmount);
+                  }
+                } else if (direction === "bottom") {
+                  target.scrollTo ? target.scrollTo(0, document.body.scrollHeight) : window.scrollTo(0, document.body.scrollHeight);
+                } else if (direction === "top") {
+                  target.scrollTo ? target.scrollTo(0, 0) : window.scrollTo(0, 0);
+                }
+              }, action);
+              break;
+            case "hover":
+              await page.hover(action.selector);
+              break;
+            case "select":
+              await page.select(action.selector, action.value);
+              break;
+            case "wait":
+              await new Promise((resolve) => setTimeout(resolve, action.duration));
+              break;
+            case "evaluate":
+              const evalResult = await page.evaluate(action.script);
+              output.scrapedData = [...output.scrapedData ?? [], evalResult];
+              break;
+          }
+        }
+      }
+      if (context.screenshot) {
+        const SCREENSHOT_DIR = path.resolve(process.cwd(), "puppeteer_screenshots");
+        await page.screenshot({ path: path.join(SCREENSHOT_DIR, generateScreenshotFilename(context.url)), fullPage: true });
+        output.screenshotPath = path.join(SCREENSHOT_DIR, generateScreenshotFilename(context.url));
+      }
+      output.success = true;
+    } catch (error) {
+      output.error = error instanceof Error ? error.message : String(error);
+      output.success = false;
+      logger$1.error(`puppeteerScrapeTool error: ${output.error}`);
+    } finally {
+      if (browser) await browser.close();
+    }
+    return output;
+  }
+});
+
+const KG_PATH = path.join(__dirname, "knowledge-graph.json");
+const AgentSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  agentType: z.string(),
+  skills: z.array(z.string())
+});
+const AgentListSchema = z.array(AgentSchema);
+const RelationshipSchema = z.object({
+  source: z.string(),
+  target: z.string(),
+  type: z.string(),
+  since: z.string().optional(),
+  weight: z.number().optional()
+});
+const RelationshipListSchema = z.array(RelationshipSchema);
+async function loadKnowledgeGraph() {
+  const raw = await fs__default.readFile(KG_PATH, "utf-8");
+  const doc = JSON.parse(raw);
+  const expanded = await jsonld.expand(doc);
+  return { doc, expanded };
+}
+function listAgents(doc) {
+  return doc.entities.map((agent) => ({
+    id: agent.id,
+    label: agent.label,
+    agentType: agent.agentType,
+    skills: agent.skills
+  }));
+}
+function findAgentsWithSkill(doc, skill) {
+  return doc.entities.filter((agent) => agent.skills && agent.skills.includes(skill));
+}
+function getCollaborators(doc, agentId) {
+  const agent = doc.entities.find((a) => a.id === agentId);
+  if (!agent || !agent.collaborates_with) return [];
+  return agent.collaborates_with.map(
+    (id) => doc.entities.find((a) => a.id === id)
+  );
+}
+function listRelationships(doc, type) {
+  if (!doc.relationships) return [];
+  return type ? doc.relationships.filter((rel) => rel.type === type) : doc.relationships;
+}
+const listAgentsTool = createTool({
+  id: "listAgents",
+  description: "List all agents in the knowledge graph",
+  inputSchema: z.object({}),
+  outputSchema: AgentListSchema,
+  execute: async () => {
+    const { doc } = await loadKnowledgeGraph();
+    return listAgents(doc);
+  }
+});
+const findAgentsWithSkillTool = createTool({
+  id: "findAgentsWithSkill",
+  description: "Find agents with a specific skill",
+  inputSchema: z.object({ skill: z.string() }),
+  outputSchema: AgentListSchema,
+  execute: async ({ skill }) => {
+    const { doc } = await loadKnowledgeGraph();
+    return findAgentsWithSkill(doc, skill);
+  }
+});
+const getCollaboratorsTool = createTool({
+  id: "getCollaborators",
+  description: "Get collaborators for a given agent",
+  inputSchema: z.object({ agentId: z.string() }),
+  outputSchema: AgentListSchema,
+  execute: async ({ agentId }) => {
+    const { doc } = await loadKnowledgeGraph();
+    return getCollaborators(doc, agentId);
+  }
+});
+const listRelationshipsTool = createTool({
+  id: "listRelationships",
+  description: "List relationships in the knowledge graph, optionally filtered by type",
+  inputSchema: z.object({ type: z.string().optional() }),
+  outputSchema: RelationshipListSchema,
+  execute: async ({ type }) => {
+    const { doc } = await loadKnowledgeGraph();
+    return listRelationships(doc, type);
+  }
+});
 
 const logger = createLogger({
   name: "tool-initialization",
@@ -6864,4 +7439,4 @@ logger.info(`Arxiv tools included: ${extraTools.some((t) => t.id.startsWith("arx
 logger.info(`AI SDK tools included: ${extraTools.some((t) => t.id.startsWith("ai-sdk_"))}`);
 console.log("All available tool IDs:", Array.from(allToolsMap.keys()));
 
-export { AiSdkPromptOutputSchema, ArXivClient, ArxivDownloadPdfOutputSchema, ArxivPdfUrlOutputSchema, ArxivSearchEntrySchema, ArxivSearchOutputSchema, CryptoAggregatesSchema, CryptoTickersSchema, E2BOutputSchema, createExaSearchProvider as ExaSearchOutputSchema, ExaSearchProvider, FeedbackType, FileEncoding, FileWriteMode, GitHubBranchSchema, GitHubBranchesListSchema, GitHubClient, GitHubCodeSearchItemSchema, GitHubCodeSearchResultsSchema, GitHubCommitSchema, GitHubCommitsListSchema, GitHubIssueSchema, GitHubIssuesListSchema, GitHubPullSchema, GitHubPullsListSchema, GitHubReleaseSchema, GitHubReleasesListSchema, GitHubRepoSchema, GitHubReposListSchema, GitHubUserSchema, LLMChainOutputSchema, MastraPolygonClient, MastraRedditClient, OTelAttributeNames, PreviousCloseSchema, RewardType, SpanStatusCode, SubredditPostSchema, SubredditPostsSchema, TickerAggregatesSchema, TickerDetailsSchema, TickerNewsSchema, WikipediaClient, WikipediaPageResultSchema, WikipediaSearchSchema, WikipediaSummarySchema, WikipediaThumbnailSchema, aiSdkPromptTool, allTools, allToolsMap, analyzeContentTool, analyzeFeedbackTool, applyRLInsightsTool, arxiv, calculateRewardTool, calculatorTool as calculator, collectFeedbackTool, createAISDKTools, createAISpan, createArxivClient, createBraveSearchTool, createE2BSandboxTool, createExaSearchProvider, createFileTool, createGitHubClient, createGoogleSearchTool, createGraphRagTool, createHttpSpan, createLlamaIndexTools, createMastraAISDKTools, createMastraArxivTools, createMastraE2BTools, createMastraExaSearchTools, createMastraGitHubTools, createMastraLLMChainTools, createMastraLlamaIndexTools, createMastraMcpTools, createMastraPolygonTools, createMastraRedditTools, createMastraVectorQueryTool, createMastraWikipediaTools, createTavilySearchTool, createWikipediaClient, csvReaderTool, allToolsMap as default, defineRewardFunctionTool, deleteFileTool, docxReaderTool, e2b, editFileTool, embedDocumentTool, extractHtmlTextTool, filteredQueryTool, formatContentTool, getMainBranchRef, getMeterProvider, getTracer, getUnreadFeedbackThreads, googleVectorQueryTool, graphRagQueryTool, toolGroups as groups, initOpenTelemetryTool, initSigNoz, jsonReaderTool, listFilesTool, llmChainTool, optimizePolicyTool, puppeteerTool, readFileTool, readKnowledgeFileTool, recordLlmMetrics, recordLlmMetricsTool, recordMetrics, searchDocumentsTool, shutdownSigNoz, shutdownTracingTool, startAISpanTool, toolGroups, allToolsMap as toolMap, tracingTools, vectorQueryTool, wikipedia, writeKnowledgeFileTool, writeToFileTool };
+export { AgentListSchema, AgentSchema, AiSdkPromptOutputSchema, ArXivClient, ArxivDownloadPdfOutputSchema, ArxivPdfUrlOutputSchema, ArxivSearchEntrySchema, ArxivSearchOutputSchema, E2BOutputSchema, createExaSearchProvider as ExaSearchOutputSchema, ExaSearchProvider, FeedbackType, FileEncoding, FileWriteMode, GitHubBranchSchema, GitHubBranchesListSchema, GitHubClient, GitHubCodeSearchItemSchema, GitHubCodeSearchResultsSchema, GitHubCommitSchema, GitHubCommitsListSchema, GitHubIssueSchema, GitHubIssuesListSchema, GitHubPullSchema, GitHubPullsListSchema, GitHubReleaseSchema, GitHubReleasesListSchema, GitHubRepoSchema, GitHubReposListSchema, GitHubUserSchema, LLMChainOutputSchema, MastraRedditClient, OTelAttributeNames, RelationshipListSchema, RelationshipSchema, RewardType, SpanStatusCode, SubredditPostSchema, SubredditPostsSchema, TickerDetailsSchema, WikipediaClient, WikipediaPageResultSchema, WikipediaSearchSchema, WikipediaSummarySchema, WikipediaThumbnailSchema, aiSdkPromptTool, allTools, allToolsMap, analyzeContentTool, analyzeFeedbackTool, applyRLInsightsTool, arxiv, calculateRewardTool, calculatorTool as calculator, collectFeedbackTool, createAISDKTools, createAISpan, createArxivClient, createBraveSearchTool, createE2BSandboxTool, createExaSearchProvider, createFileTool, createGitHubClient, createGoogleSearchTool, createGraphRagTool, createHttpSpan, createLlamaIndexTools, createMastraAISDKTools, createMastraArxivTools, createMastraE2BTools, createMastraExaSearchTools, createMastraGitHubTools, createMastraLLMChainTools, createMastraLlamaIndexTools, createMastraMcpTools, createMastraRedditTools, createMastraVectorQueryTool, createMastraWikipediaTools, createTavilySearchTool, createWikipediaClient, csvReaderTool, allToolsMap as default, defineRewardFunctionTool, deleteFileTool, docxReaderTool, e2b, editFileTool, embedDocumentTool, extractHtmlTextTool, filteredQueryTool, findAgentsWithSkillTool, formatContentTool, getCollaboratorsTool, getMainBranchRef, getMeterProvider, getTracer, getUnreadFeedbackThreads, googleVectorQueryTool, graphRagQueryTool, toolGroups as groups, initOpenTelemetryTool, initSigNoz, jsonReaderTool, listAgentsTool, listFilesTool, listRelationshipsTool, llamaindexTools, llmChainTool, optimizePolicyTool, puppeteerScrapeTool, readFileTool, readKnowledgeFileTool, recordLlmMetrics, recordLlmMetricsTool, recordMetrics, searchDocumentsTool, shutdownSigNoz, shutdownTracingTool, startAISpanTool, toolGroups, allToolsMap as toolMap, tracingTools, vectorQueryTool, wikipedia, writeKnowledgeFileTool, writeToFileTool };

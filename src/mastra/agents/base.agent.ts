@@ -23,6 +23,7 @@ import {
 import { createResponseHook } from "../hooks";
 import { allToolsMap } from "../tools";
 import * as api from "@opentelemetry/api";
+import { threadManager } from "../utils/thread-manager";
 //import { createGoogleVoice } from "../voice";
 
 // ─── Initialize Google Voice ────────────────────────────────────────────────
@@ -193,6 +194,8 @@ export function createAgentFromConfig({
   agentCreationCounter?.add(1, { agent_id: config.id });
   agentCreationLatency?.record(Date.now() - start, { agent_id: config.id });
 
+  // Attach thread manager to agent for conversation threading
+  (agent as any).threadManager = threadManager;
   return agent;
 }
 

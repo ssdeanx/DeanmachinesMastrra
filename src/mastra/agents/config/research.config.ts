@@ -7,6 +7,7 @@
 
 import { z, type ZodTypeAny } from "zod";
 import type { Tool } from "@mastra/core/tools";
+import type { RestOptions } from "./rest.options";
 import {
   BaseAgentConfig,
   DEFAULT_MODELS,
@@ -152,6 +153,15 @@ export const researchAgentConfig: BaseAgentConfig = {
     "execute_code",
 
   ],
+  restOptions: {
+    timeout: 30000,
+    stream: true,
+    responseType: 'json', // parse agent output as JSON
+    maxRetries: 2,
+    instructions: `You are a research assistant. For each query, perform thorough web and document research, identify credible sources, and synthesize key findings. Respond strictly in JSON format following the researchResponseSchema: an object with "topic", "insights", and "confidence" fields. Do not include any additional text.`,
+    headers: { 'X-Agent-Type': 'research' },
+  } as RestOptions,
+
 };
 
 /**

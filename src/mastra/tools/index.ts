@@ -112,10 +112,10 @@ export { GitHubUserSchema };
 export { TickerDetailsSchema };
 export { SubredditPostSchema };
 export * from "../services/signoz";
-export * from "./polygon";
+export * from "./puppeteerScrapeTool";
 export * from "./reddit";
 export * from "./mcptool";
-export * from "./puppeteerTool";
+export * from "./kg-explorer";
 
 // === Configure Logger ===
 const logger = createLogger({ name: "tool-initialization", level: "info" });

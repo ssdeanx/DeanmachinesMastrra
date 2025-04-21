@@ -12,9 +12,13 @@ import {
   type ResponseHookOptions,
   createModelInstance
 } from "./config/index";
+import type { ModelConfig } from "./config/config.types";
+import type { RestOptions } from "./config/rest.options";
 import { Agent, createAgentFromConfig } from "./base.agent";
 import { allToolsMap } from "../tools/index"; // Ensure allToolsMap is exported from tools/index.ts
-import { sharedMemory as defaultSharedMemory, sharedMemory } from "../database/index";
+import { sharedMemory } from "../database/index";
+import { redisMemory } from "../database/redis";
+
 import { createLogger } from "@mastra/core/logger";
 import { initSigNoz } from "../services/signoz";
 import { initializeDefaultTracing } from "../services/tracing";
@@ -30,7 +34,11 @@ import {
   createStreamHooks,
   createToolHooks
 } from "../hooks/index";
+import { threadManager } from "../utils/thread-manager"; // Import threadManager
 
+
+// Fallback: use sharedMemory if redisMemory is undefined
+const defaultSharedMemory = redisMemory ?? sharedMemory;
 /**
  * Context object for middleware
  */
@@ -218,7 +226,14 @@ export const createAdvancedAgent = (
     : undefined;
 
   // Create model instance using config.modelConfig (like base.agent.ts)
-  const model = createModelInstance(config.modelConfig);
+  const model = createModelInstance(config.modelConfig as ModelConfig);
+
+  // Build restOptions as a type-safe object (optional)
+  const restOptions: RestOptions = {
+    instructions: config.instructions,
+    toolsets: config.tools,
+    // Add more properties as needed
+  };
 
   // Create the base agent using createAgentFromConfig from base.agent.ts
   let baseAgent: Agent;
@@ -502,14 +517,25 @@ export const createAdvancedAgent = (
       throw initialError;
     }
   };
-
-  // Construct and return final agent
-  const finalAgent: AdvancedAgentType = {
+  const finalAgent = {
     ...advancedAgentBase,
-    generate: generateImplementation as any,
+    generate: generateImplementation,
     ...(advancedAgentBase.originalStream && { stream: streamImplementation }),
+    __registerMastra(mastraInstance: any) {
+      Object.defineProperty(this, '_mastraInstance', {
+        value: mastraInstance,
+        writable: true,
+        enumerable: false,
+        configurable: true,
+      });
+      if (mastraInstance.memory && typeof mastraInstance.memory.createForAgent === 'function' && this.id) {
+        this.memory = mastraInstance.memory.createForAgent(this.id);
+      }
+    },
   };
 
+  // Attach thread manager to advanced agent instance
+  (finalAgent as any).threadManager = threadManager;
   return finalAgent;
 };
 

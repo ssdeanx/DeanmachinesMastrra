@@ -9,6 +9,7 @@ import { LibSQLStore } from "@mastra/core/storage/libsql";
 import { LibSQLVector } from "@mastra/core/vector/libsql";
 import { Memory } from "@mastra/memory";
 import type { MastraStorage, MastraVector } from "@mastra/core";
+import { threadManager } from "../utils/thread-manager";
 
 // Define the memory configuration type
 export interface MemoryConfig {
@@ -30,8 +31,8 @@ export interface MemoryConfig {
 }
 
 // Default memory configuration that works well for most agents
-const defaultMemoryConfig: MemoryConfig = {
-  lastMessages: 50,
+export const defaultMemoryConfig: MemoryConfig = {
+  lastMessages: 100,
   semanticRecall: {
     topK: 5,
     messageRange: {
@@ -77,6 +78,8 @@ export function createMemory(
 
 // Export shared memory instance
 export const sharedMemory = createMemory();
+// Thread manager for conversation memory threading
+export { threadManager };
 
 // Re-export Memory type for convenience
 export type { Memory };

@@ -9,6 +9,7 @@
 
 
 import { Tool } from "@mastra/core/tools";
+import type { RestOptions } from "./rest.options";
 
 /**
  * Supported AI model providers
@@ -385,6 +386,9 @@ export interface BaseAgentConfig {
 
   /** Optional tools configuration */
   tools?: Tool[];
+
+  /** Optional REST options for advanced agent operations */
+  restOptions?: RestOptions;
 }
 
 /**

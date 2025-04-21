@@ -707,13 +707,25 @@ export const editFileTool = createTool({
       let newContent;
       if (context.isRegex) {
         const regex = new RegExp(context.search, "g");
-        newContent = content.replace(regex, (match) => {
+        const contentStr = typeof content === "string" ? content : content.toString(context.encoding || "utf8");
+        newContent = contentStr.replace(regex, function(match: string, ...args: any[]) {
           edits++;
-          return context.replace;
+          // If context.replace contains $1, $2, etc., allow replacement with capture groups
+          // args[args.length-2] is offset, args[args.length-1] is the whole string
+          // args[0]..args[n-3] are capture groups
+          let result = context.replace;
+          for (let i = 1; i < args.length - 1; i++) {
+            // Replace $1, $2, ... with respective capture group
+            result = result.replace(new RegExp('\\$' + i, 'g'), args[i-1] ?? '');
+          }
+          // Optionally, $0 for the full match
+          result = result.replace(/\$0/g, match);
+          return result;
         });
       } else {
-        newContent = content.split(context.search).join(context.replace);
-        edits = (content.match(new RegExp(context.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "g")) || []).length;
+        const contentStr = typeof content === "string" ? content : content.toString(context.encoding || "utf8");
+        newContent = contentStr.split(context.search).join(context.replace);
+        edits = (contentStr.match(new RegExp(context.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "g")) || []).length;
       }
       await fs.writeFile(absolutePath, newContent, context.encoding);
       return {

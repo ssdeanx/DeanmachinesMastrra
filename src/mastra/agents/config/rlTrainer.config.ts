@@ -269,9 +269,10 @@ export const rlTrainerResponseSchema = z.object({
           .string().optional()
           .describe("Expected outcome from this change"),
         confidenceLevel: z
-          .number().optional()
+          .number()
           .min(0)
           .max(1)
+          .optional()
           .describe("Confidence in this recommendation (0-1)"),
         measurementMethod: z
           .string().optional()

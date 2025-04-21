@@ -3,23 +3,25 @@ import { Memory } from "@mastra/memory";
 import { Redis } from "@upstash/redis";
 import { Index as UpstashVectorIndex } from "@upstash/vector";
 import { logWithTraceContext } from "../services/tracing";
+import { threadManager } from "../utils/thread-manager";
+import { defaultMemoryConfig } from "./index";
 import signoz from "../services/signoz";
+import type { MastraVector } from "@mastra/core";
 
 // --- Tracing helpers ---
-function traced<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+async function traced<T>(operation: string, fn: () => Promise<T>): Promise<T> {
   const span = signoz.createSpan(operation);
-  return fn()
-    .then((result) => {
-      span.setStatus({ code: 1 });
-      span.end();
-      return result;
-    })
-    .catch((error) => {
-      span.setStatus({ code: 2, message: error?.message || String(error) });
-      logWithTraceContext(console, "error", `${operation} failed`, { error });
-      span.end();
-      throw error;
-    });
+  try {
+    const result = await fn();
+    span.setStatus({ code: 1 });
+    span.end();
+    return result;
+  } catch (error) {
+    span.setStatus({ code: 2, message: error?.message || String(error) });
+    logWithTraceContext(console, "error", `${operation} failed`, { error });
+    span.end();
+    throw error;
+  }
 }
 
 // --- Upstash Redis Client (raw, for health checks/advanced ops) ---
@@ -34,6 +36,18 @@ try {
   logWithTraceContext(console, "error", "Failed to initialize Upstash Redis client", { error });
 }
 
+// --- Upstash VectorDB (full feature set) ---
+let upstashVector: UpstashVectorIndex<any> | undefined;
+try {
+  upstashVector = new UpstashVectorIndex({
+    url: process.env.UPSTASH_VECTOR_REST_URL! || "file:.mastra/mastra.db",
+    token: process.env.UPSTASH_VECTOR_REST_TOKEN! || "file:.mastra/mastra.db",
+  });
+  logWithTraceContext(console, "info", "Upstash VectorDB initialized", { url: process.env.UPSTASH_VECTOR_REST_URL, index: process.env.UPSTASH_INDEX });
+} catch (error) {
+  logWithTraceContext(console, "error", "Failed to initialize Upstash VectorDB", { error });
+}
+
 // --- UpstashStore for Mastra Memory ---
 let redisStore: UpstashStore | undefined;
 let redisMemory: Memory | undefined;
@@ -44,25 +58,12 @@ try {
   });
   redisMemory = new Memory({
     storage: redisStore,
-    options: {
-      lastMessages: 100,
-    },
+    vector: upstashVector as unknown as MastraVector,
+    options: defaultMemoryConfig,
   });
   logWithTraceContext(console, "info", "Upstash Redis memory initialized", { url: process.env.UPSTASH_REDIS_REST_URL });
 } catch (error) {
   logWithTraceContext(console, "error", "Failed to initialize Upstash Redis memory", { error });
-}
-
-// --- Upstash VectorDB (full feature set) ---
-let upstashVector: UpstashVectorIndex<any> | undefined;
-try {
-  upstashVector = new UpstashVectorIndex({
-    url: process.env.UPSTASH_VECTOR_REST_URL!,
-    token: process.env.UPSTASH_VECTOR_REST_TOKEN!,
-  });
-  logWithTraceContext(console, "info", "Upstash VectorDB initialized", { url: process.env.UPSTASH_VECTOR_REST_URL, index: process.env.UPSTASH_INDEX });
-} catch (error) {
-  logWithTraceContext(console, "error", "Failed to initialize Upstash VectorDB", { error });
 }
 
 // --- VectorDB Feature Wrappers (traced) ---
@@ -107,4 +108,4 @@ export async function checkRedisHealth() {
   }).catch(() => false);
 }
 
-export { redisClient, redisStore, redisMemory, upstashVector };
+export { redisClient, redisStore, redisMemory, upstashVector, threadManager };

@@ -1,6 +1,6 @@
 import { createAdvancedAgent } from "./advanced.base.agent";
 import { researchAgentConfig } from "./config";
-import { sharedMemory } from "../database";
+import { redisMemory as sharedMemory } from "../database/redis";
 import { createLogger } from "@mastra/core";
 
 // Optional: define preHooks, postHooks, or advanced options as needed
@@ -20,6 +20,12 @@ export const researchAgent = createAdvancedAgent(
   // Optionally, you can pass preHooks and postHooks arrays here as well
 );
 
+// Example: use restOptions in a model call
+const result = await researchAgent.model.generate({
+  ...researchAgent.restOptions,
+  prompt: 'Find me the latest AI research papers.',
+});
+
 export type ResearchAgent = typeof researchAgent;
 export default researchAgent;/**
  * Research Agent Implementation
@@ -27,4 +33,3 @@ export default researchAgent;/**
  * This agent is specialized in finding, gathering, and synthesizing information
  * from various sources including web searches, document repositories, and files.
  */
-

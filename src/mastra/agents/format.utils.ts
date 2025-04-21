@@ -1,4 +1,4 @@
-import { XMLParser } from 'fast-xml-parser';
+import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 import YAML from 'yaml';
 import Database from 'better-sqlite3';
 
@@ -41,7 +41,6 @@ export function stringifyOutput(obj: any, format: SupportedFormat): string {
     case 'json':
       return JSON.stringify(obj, null, 2);
     case 'xml': {
-      const { XMLBuilder } = require('fast-xml-parser');
       const builder = new XMLBuilder();
       return builder.build(obj);
     }

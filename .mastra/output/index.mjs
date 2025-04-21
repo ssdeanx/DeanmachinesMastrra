@@ -2,7 +2,7 @@ import { evaluate } from '@mastra/core/eval';
 import { registerHook, AvailableHooks } from '@mastra/core/hooks';
 import { TABLE_EVALS } from '@mastra/core/storage';
 import { checkEvalStorageFields } from '@mastra/core/utils';
-import { Mastra, isVercelTool } from '@mastra/core';
+import { createLogger as createLogger$1, Mastra, isVercelTool } from '@mastra/core';
 import { createLogger } from '@mastra/core/logger';
 import { z, ZodType, ZodFirstPartyTypeKind, ZodOptional } from 'zod';
 import { Langfuse } from 'langfuse';
@@ -17,7 +17,7 @@ import { SimpleSpanProcessor, ConsoleSpanExporter } from '@opentelemetry/sdk-tra
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { SemanticResourceAttributes, SemanticAttributes } from '@opentelemetry/semantic-conventions';
 import * as api from '@opentelemetry/api';
-import { propagation, trace, metrics, context, SpanStatusCode as SpanStatusCode$1 } from '@opentelemetry/api';
+import { trace, context, propagation, metrics, SpanStatusCode as SpanStatusCode$1 } from '@opentelemetry/api';
 import { resourceFromAttributes, detectResources } from '@opentelemetry/resources';
 import { CompositePropagator } from '@opentelemetry/core';
 import { B3Propagator } from '@opentelemetry/propagator-b3';
@@ -54,7 +54,13 @@ import mammoth from 'mammoth';
 import Papa from 'papaparse';
 import * as cheerio from 'cheerio';
 import { FunctionTool } from 'llamaindex';
-import { XMLParser } from 'fast-xml-parser';
+import { UpstashStore } from '@mastra/upstash';
+import { Redis } from '@upstash/redis';
+import { Index } from '@upstash/vector';
+import { XMLParser, XMLBuilder } from 'fast-xml-parser';
+import YAML from 'yaml';
+import Database from 'better-sqlite3';
+import { zodToJsonSchema as zodToJsonSchema$1 } from 'zod-to-json-schema';
 import defaultKy from 'ky';
 import pThrottle from 'p-throttle';
 import { Sandbox } from '@e2b/code-interpreter';
@@ -338,7 +344,7 @@ const langfuse = new LangfuseService();
 const logger$s = createLogger({ name: "signoz-service", level: "info" });
 let sdk = null;
 let tracer = null;
-let meterProvider$1 = null;
+let meterProvider$2 = null;
 function initSigNoz(config = {}) {
   const isEnabled = env.MASTRA_TELEMETRY_ENABLED?.toLowerCase() === "false" ? false : config.enabled !== false;
   if (!isEnabled) {
@@ -382,14 +388,14 @@ function initSigNoz(config = {}) {
     sdk.start();
     logger$s.info("SigNoz NodeSDK started");
     tracer = api.trace.getTracer(`${serviceName}-tracer`);
-    meterProvider$1 = api.metrics.getMeterProvider();
+    meterProvider$2 = api.metrics.getMeterProvider();
     process.on("SIGTERM", () => {
       shutdownSigNoz().then(() => logger$s.info("SigNoz shutdown complete on SIGTERM.")).catch((err) => logger$s.error("Error shutting down SigNoz on SIGTERM:", err)).finally(() => process.exit(0));
     });
     process.on("SIGINT", () => {
       shutdownSigNoz().then(() => logger$s.info("SigNoz shutdown complete on SIGINT.")).catch((err) => logger$s.error("Error shutting down SigNoz on SIGINT:", err)).finally(() => process.exit(0));
     });
-    return { tracer, meterProvider: meterProvider$1 };
+    return { tracer, meterProvider: meterProvider$2 };
   } catch (error) {
     logger$s.error("Failed to initialize SigNoz NodeSDK", {
       error: error instanceof Error ? error.message : String(error),
@@ -406,10 +412,10 @@ function getTracer() {
   return tracer;
 }
 function getMeterProvider() {
-  if (!meterProvider$1) {
+  if (!meterProvider$2) {
     throw new Error("SigNoz metrics has not been initialized successfully. Call initSigNoz first.");
   }
-  return meterProvider$1;
+  return meterProvider$2;
 }
 function createAISpan(name, attributes = {}, options = {}) {
   try {
@@ -500,7 +506,7 @@ async function shutdownSigNoz() {
       logger$s.info("SigNoz NodeSDK shutdown complete.");
       sdk = null;
       tracer = null;
-      meterProvider$1 = null;
+      meterProvider$2 = null;
     } catch (error) {
       logger$s.error("Error shutting down SigNoz NodeSDK", { error });
     }
@@ -539,6 +545,12 @@ function initializeDefaultTracing(serviceName = "mastra-service", serviceVersion
     meterProvider: meterProviderInstance,
     meter: meterInstance
   };
+}
+function logWithTraceContext(target, level, message, data) {
+  const span = trace.getSpan(context.active());
+  const traceFields = span ? { trace_id: span.spanContext().traceId, span_id: span.spanContext().spanId } : {};
+  const fn = target[level] ?? target.info ?? console.log;
+  fn.call(target, message, { ...data, ...traceFields });
 }
 function initOpenTelemetry(options) {
   const {
@@ -664,77 +676,6 @@ function initObservability(config) {
   return services;
 }
 
-function createUpstashLogger({
-  name,
-  level = "info",
-  listName,
-  upstashUrl,
-  upstashToken
-}) {
-  const baseUrl = upstashUrl.match(/^https?:\/\//) ? upstashUrl : `https://${upstashUrl}`;
-  const transport = new UpstashTransport({
-    listName,
-    upstashUrl: baseUrl,
-    upstashToken
-  });
-  function write(levelName, log) {
-    if (level === "debug" || level === "info" && levelName !== "debug" || level === "warn" && ["warn", "error"].includes(levelName) || level === "error" && levelName === "error") {
-      transport.logBuffer.push({
-        ...log,
-        level: levelName,
-        logger: name,
-        timestamp: (/* @__PURE__ */ new Date()).toISOString()
-      });
-      transport._flush?.();
-    }
-  }
-  return {
-    debug: (log) => write("debug", log),
-    info: (log) => write("info", log),
-    warn: (log) => write("warn", log),
-    error: (log) => write("error", log)
-  };
-}
-const upstashLogger = createUpstashLogger({
-  name: "Mastra",
-  level: process.env.LOG_LEVEL || "info",
-  listName: "production-logs",
-  upstashUrl: process.env.UPSTASH_REDIS_REST_URL,
-  upstashToken: process.env.UPSTASH_REDIS_REST_TOKEN
-});
-
-function createFileLogger({
-  name,
-  level = "info",
-  path: filePath
-}) {
-  const dir = path.dirname(filePath);
-  ensureDirSync(dir);
-  ensureFileSync(filePath);
-  const transport = new FileTransport({ path: filePath });
-  function write(levelName, message, meta) {
-    const entry = {
-      message,
-      level: levelName,
-      logger: name,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      ...meta
-    };
-    transport.write(JSON.stringify(entry) + "\n");
-  }
-  return {
-    debug: (msg, meta) => level === "debug" && write("debug", msg, meta),
-    info: (msg, meta) => ["info", "debug"].includes(level) && write("info", msg, meta),
-    warn: (msg, meta) => ["warn", "info", "debug"].includes(level) && write("warn", msg, meta),
-    error: (msg, meta) => write("error", msg, meta)
-  };
-}
-const fileLogger = createFileLogger({
-  name: "Mastra",
-  level: process.env.LOG_LEVEL || "info",
-  path: "./logs/mastra.log"
-});
-
 const DEFAULT_MAX_TOKENS = 8192;
 const DEFAULT_MODELS = {
   // GOOGLE PROVIDER MODELS
@@ -788,6 +729,13 @@ const defaultResponseValidation = {
     }
     return false;
   }
+};
+const defaultErrorHandler = async (error) => {
+  console.error("Agent error:", error);
+  return {
+    text: "I encountered an error. Please try again or contact support.",
+    error: error.message
+  };
 };
 
 z.object({
@@ -1326,31 +1274,31 @@ const coderAgentConfig = {
   ]
 };
 z.object({
-  code: z.string().describe("The generated or refactored code"),
-  explanation: z.string().describe("Explanation of the code's functionality and design decisions"),
+  code: z.string().optional().describe("The generated or refactored code"),
+  explanation: z.string().optional().describe("Explanation of the code's functionality and design decisions"),
   files: z.array(
     z.object({
-      name: z.string().describe("Filename"),
+      name: z.string().optional().describe("Filename"),
       path: z.string().optional().describe("File path"),
-      content: z.string().describe("File content"),
+      content: z.string().optional().describe("File content"),
       language: z.string().optional().describe("Programming language")
-    })
+    }).passthrough()
   ).optional().describe("Files to be created or modified"),
   dependencies: z.array(
     z.object({
-      name: z.string().describe("Dependency name"),
+      name: z.string().optional().describe("Dependency name"),
       version: z.string().optional().describe("Version requirement"),
       purpose: z.string().optional().describe("Why this dependency is needed")
-    })
+    }).passthrough()
   ).optional().describe("Required dependencies"),
   testCases: z.array(
     z.object({
-      description: z.string().describe("Test case description"),
+      description: z.string().optional().describe("Test case description"),
       input: z.unknown().optional().describe("Test input"),
       expectedOutput: z.unknown().optional().describe("Expected output")
-    })
+    }).passthrough()
   ).optional().describe("Suggested test cases")
-});
+}).passthrough();
 
 const codeDocumenterInstructions = `
 # TECHNICAL DOCUMENTATION SPECIALIST ROLE
@@ -1498,7 +1446,7 @@ z.object({
     classes: z.array(z.string()).optional(),
     functions: z.array(z.string()).optional(),
     interfaces: z.array(z.string()).optional()
-  }).optional().passthrough().describe("Overview of documented code structure"),
+  }).passthrough().optional().describe("Overview of documented code structure"),
   suggestedDiagrams: z.array(z.string()).optional().describe("Suggestions for visual documentation")
 }).passthrough();
 
@@ -1617,21 +1565,21 @@ const copywriterAgentConfig = {
   ]
 };
 z.object({
-  content: z.string().describe("The generated marketing copy or content"),
-  targetAudience: z.string().describe("The intended audience for this content"),
-  channelType: z.string().describe("The marketing channel this content is optimized for"),
-  toneAndVoice: z.string().describe("Description of the tone and voice used"),
-  keyMessages: z.array(z.string()).describe("Primary messages conveyed in the content"),
+  content: z.string().optional().describe("The generated marketing copy or content"),
+  targetAudience: z.string().optional().describe("The intended audience for this content"),
+  channelType: z.string().optional().describe("The marketing channel this content is optimized for"),
+  toneAndVoice: z.string().optional().describe("Description of the tone and voice used"),
+  keyMessages: z.array(z.string()).optional().describe("Primary messages conveyed in the content"),
   callToAction: z.string().optional().describe("The specific call to action, if applicable"),
   brandGuidelines: z.object({
-    followed: z.array(z.string()).describe("Brand guidelines that were followed"),
+    followed: z.array(z.string()).optional().describe("Brand guidelines that were followed"),
     exceptions: z.array(z.string()).optional().describe("Any exceptions made to brand guidelines")
-  }).optional().describe("How the content aligns with brand guidelines"),
+  }).passthrough().optional().describe("How the content aligns with brand guidelines"),
   sentimentAnalysis: z.object({
-    overall: z.string().describe("Overall sentiment of the content"),
+    overall: z.string().optional().describe("Overall sentiment of the content"),
     score: z.number().min(-1).max(1).optional().describe("Sentiment score (-1 to 1)")
-  }).optional().describe("Analysis of content sentiment")
-});
+  }).passthrough().optional().describe("Analysis of content sentiment")
+}).passthrough();
 
 const dataManagerAgentConfig = {
   id: "data-manager-agent",
@@ -1996,49 +1944,50 @@ const marketResearchAgentConfig = {
   ]
 };
 z.object({
-  analysis: z.string().describe("Analysis of market data and insights"),
+  analysis: z.string().optional().describe("Analysis of market data and insights"),
   marketTrends: z.array(
     z.object({
-      trend: z.string().describe("Identified market trend"),
-      impact: z.string().describe("Potential impact on business"),
-      confidence: z.number().min(0).max(1).describe("Confidence level in this trend (0-1)")
-    })
-  ).describe("Key market trends identified"),
+      trend: z.string().optional().describe("Identified market trend"),
+      impact: z.string().optional().describe("Potential impact on business"),
+      confidence: z.number().min(0).max(1).optional().describe("Confidence level in this trend (0-1)")
+    }).passthrough()
+  ).optional().describe("Key market trends identified"),
   competitorAnalysis: z.array(
     z.object({
-      competitor: z.string().describe("Competitor name"),
-      strengths: z.array(z.string()).describe("Competitor's strengths"),
-      weaknesses: z.array(z.string()).describe("Competitor's weaknesses"),
+      competitor: z.string().optional().describe("Competitor name"),
+      strengths: z.array(z.string()).optional().describe("Competitor's strengths"),
+      weaknesses: z.array(z.string()).optional().describe("Competitor's weaknesses"),
       marketShare: z.number().optional().describe("Estimated market share percentage")
-    })
+    }).passthrough()
   ).optional().describe("Analysis of key competitors"),
   targetAudience: z.array(
     z.object({
-      segment: z.string().describe("Audience segment name"),
-      demographics: z.string().describe("Key demographic characteristics"),
-      needs: z.array(z.string()).describe("Primary needs and pain points"),
-      opportunities: z.array(z.string()).describe("Business opportunities with this segment")
-    })
+      segment: z.string().optional().describe("Audience segment name"),
+      demographics: z.string().optional().describe("Key demographic characteristics"),
+      needs: z.array(z.string()).optional().describe("Primary needs and pain points"),
+      opportunities: z.array(z.string()).optional().describe("Business opportunities with this segment")
+    }).passthrough()
   ).optional().describe("Target audience segments identified"),
   recommendations: z.array(
     z.object({
-      recommendation: z.string().describe("Strategic recommendation"),
-      rationale: z.string().describe("Data-backed rationale"),
-      priority: z.enum(["high", "medium", "low"]).describe("Priority level")
-    })
-  ).describe("Strategic recommendations based on research"),
+      recommendation: z.string().optional().describe("Strategic recommendation"),
+      rationale: z.string().optional().describe("Data-backed rationale"),
+      priority: z.enum(["high", "medium", "low"]).optional().describe("Priority level")
+    }).passthrough()
+  ).optional().describe("Strategic recommendations based on research"),
   sources: z.array(
     z.object({
-      title: z.string().describe("Source title"),
+      title: z.string().optional().describe("Source title"),
       url: z.string().optional().describe("Source URL"),
       relevance: z.string().optional().describe("Relevance to findings")
-    })
+    }).passthrough()
   ).optional().describe("Research sources")
-});
+}).passthrough();
 
 const researchAgentConfig = {
   id: "research-agent",
   name: "Research Agent",
+  description: "Specialized in finding, gathering, and synthesizing information from various sources.",
   modelConfig: DEFAULT_MODELS.GOOGLE_MAIN,
   responseValidation: defaultResponseValidation,
   instructions: `
@@ -2344,18 +2293,18 @@ const rlTrainerAgentConfig = {
   ]
 };
 z.object({
-  analysis: z.string().describe("Analysis of agent performance data"),
+  analysis: z.string().optional().describe("Analysis of agent performance data"),
   recommendations: z.array(
     z.object({
-      targetArea: z.string().describe("The specific aspect of agent behavior to improve"),
-      change: z.string().describe("Proposed modification to the agent configuration"),
-      expectedImprovement: z.string().describe("Expected outcome from this change"),
-      confidenceLevel: z.number().min(0).max(1).describe("Confidence in this recommendation (0-1)"),
-      measurementMethod: z.string().describe("How to measure the effectiveness of this change")
-    })
-  ).describe("Recommended optimization changes"),
+      targetArea: z.string().optional().describe("The specific aspect of agent behavior to improve"),
+      change: z.string().optional().describe("Proposed modification to the agent configuration"),
+      expectedImprovement: z.string().optional().describe("Expected outcome from this change"),
+      confidenceLevel: z.number().min(0).max(1).optional().describe("Confidence in this recommendation (0-1)"),
+      measurementMethod: z.string().optional().describe("How to measure the effectiveness of this change")
+    }).passthrough()
+  ).optional().describe("Recommended optimization changes"),
   metrics: z.record(z.string(), z.number()).optional().describe("Quantified performance metrics")
-});
+}).passthrough();
 
 const seoAgentConfig = {
   id: "seo-agent",
@@ -2966,6 +2915,77 @@ z.object({
   ).optional().describe("Recommendations for further improvements")
 });
 
+function createUpstashLogger({
+  name,
+  level = "info",
+  listName,
+  upstashUrl,
+  upstashToken
+}) {
+  const baseUrl = upstashUrl.match(/^https?:\/\//) ? upstashUrl : `https://${upstashUrl}`;
+  const transport = new UpstashTransport({
+    listName,
+    upstashUrl: baseUrl,
+    upstashToken
+  });
+  function write(levelName, log) {
+    if (level === "debug" || level === "info" && levelName !== "debug" || level === "warn" && ["warn", "error"].includes(levelName) || level === "error" && levelName === "error") {
+      transport.logBuffer.push({
+        ...log,
+        level: levelName,
+        logger: name,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      transport._flush?.();
+    }
+  }
+  return {
+    debug: (log) => write("debug", log),
+    info: (log) => write("info", log),
+    warn: (log) => write("warn", log),
+    error: (log) => write("error", log)
+  };
+}
+const upstashLogger = createUpstashLogger({
+  name: "Mastra",
+  level: process.env.LOG_LEVEL || "info",
+  listName: "production-logs",
+  upstashUrl: process.env.UPSTASH_REDIS_REST_URL,
+  upstashToken: process.env.UPSTASH_REDIS_REST_TOKEN
+});
+
+function createFileLogger({
+  name,
+  level = "info",
+  path: filePath
+}) {
+  const dir = path.dirname(filePath);
+  ensureDirSync(dir);
+  ensureFileSync(filePath);
+  const transport = new FileTransport({ path: filePath });
+  function write(levelName, message, meta) {
+    const entry = {
+      message,
+      level: levelName,
+      logger: name,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      ...meta
+    };
+    transport.write(JSON.stringify(entry) + "\n");
+  }
+  return {
+    debug: (msg, meta) => level === "debug" && write("debug", msg, meta),
+    info: (msg, meta) => ["info", "debug"].includes(level) && write("info", msg, meta),
+    warn: (msg, meta) => ["warn", "info", "debug"].includes(level) && write("warn", msg, meta),
+    error: (msg, meta) => write("error", msg, meta)
+  };
+}
+const fileLogger = createFileLogger({
+  name: "Mastra",
+  level: process.env.LOG_LEVEL || "info",
+  path: "./logs/mastra.log"
+});
+
 const logger$q = createLogger({ name: "mastra-hooks", level: "debug" });
 function createResponseHook(config = {}) {
   const {
@@ -3061,6 +3081,99 @@ function createResponseHook(config = {}) {
         text: "I encountered an error processing the response. Please try again.",
         error: error instanceof Error ? error.message : "Unknown error"
       };
+    }
+  };
+}
+function createStreamHooks(enableTracing = true) {
+  return {
+    onStreamStart: async (options) => {
+      const streamSpan = enableTracing ? trace.getTracer("mastra-hooks").startSpan("stream-start") : null;
+      try {
+        const currentSpan = trace.getSpan(context.active());
+        const traceId = currentSpan?.spanContext().traceId;
+        const spanId = currentSpan?.spanContext().spanId;
+        const lastMessage = Array.isArray(options.context) && options.context.length > 0 ? options.context[options.context.length - 1] : null;
+        const inputContent = typeof lastMessage?.content === "string" ? lastMessage.content : null;
+        logger$q.debug("Stream processing started", {
+          traceId,
+          spanId,
+          inputLength: inputContent ? inputContent.length : "no-string-content",
+          hasMessages: Array.isArray(options.context) ? options.context.length : "no-messages"
+        });
+        if (streamSpan) {
+          streamSpan.setAttribute("stream.started", true);
+          streamSpan.end();
+        }
+      } catch (error) {
+        logger$q.error("Error in stream start hook:", { error });
+        if (streamSpan) {
+          streamSpan.setStatus({
+            code: SpanStatusCode$1.ERROR,
+            message: "Error in stream start hook"
+          });
+          streamSpan.end();
+        }
+      }
+    },
+    onStreamEnd: async (result) => {
+      const streamSpan = enableTracing ? trace.getTracer("mastra-hooks").startSpan("stream-end") : null;
+      try {
+        logger$q.debug("Stream processing ended successfully");
+        if (streamSpan) {
+          streamSpan.setAttribute("stream.completed", true);
+          streamSpan.end();
+        }
+      } catch (error) {
+        logger$q.error("Error in stream end hook:", { error });
+        if (streamSpan) {
+          streamSpan.setStatus({
+            code: SpanStatusCode$1.ERROR,
+            message: "Error in stream end hook"
+          });
+          streamSpan.end();
+        }
+      }
+    },
+    onStreamError: async (error) => {
+      const streamSpan = enableTracing ? trace.getTracer("mastra-hooks").startSpan("stream-error") : null;
+      try {
+        logger$q.error("Stream processing error:", {
+          errorName: error.name,
+          errorMessage: error.message,
+          errorStack: error.stack
+        });
+        if (streamSpan) {
+          streamSpan.setStatus({
+            code: SpanStatusCode$1.ERROR,
+            message: error.message
+          });
+          streamSpan.recordException(error);
+          streamSpan.end();
+        }
+        try {
+          const currentSpan = trace.getSpan(context.active());
+          const traceId = currentSpan?.spanContext().traceId;
+          if (traceId) {
+            langfuse.createScore({
+              name: "stream-error",
+              value: 0,
+              traceId,
+              comment: `Stream error: ${error.message}`
+            });
+          }
+        } catch (err) {
+          logger$q.warn("Failed to record stream error in Langfuse", { error: err });
+        }
+      } catch (hookError) {
+        logger$q.error("Error in stream error hook:", { hookError });
+        if (streamSpan) {
+          streamSpan.setStatus({
+            code: SpanStatusCode$1.ERROR,
+            message: "Error in stream error hook"
+          });
+          streamSpan.end();
+        }
+      }
     }
   };
 }
@@ -3632,21 +3745,6 @@ function createMastraExaSearchTools(config) {
   return mastraTools;
 }
 
-var FileEncoding = /* @__PURE__ */ ((FileEncoding2) => {
-  FileEncoding2["UTF8"] = "utf8";
-  FileEncoding2["ASCII"] = "ascii";
-  FileEncoding2["UTF16LE"] = "utf16le";
-  FileEncoding2["LATIN1"] = "latin1";
-  FileEncoding2["BASE64"] = "base64";
-  FileEncoding2["HEX"] = "hex";
-  return FileEncoding2;
-})(FileEncoding || {});
-var FileWriteMode = /* @__PURE__ */ ((FileWriteMode2) => {
-  FileWriteMode2["OVERWRITE"] = "overwrite";
-  FileWriteMode2["APPEND"] = "append";
-  FileWriteMode2["CREATE_NEW"] = "create-new";
-  return FileWriteMode2;
-})(FileWriteMode || {});
 const KNOWLEDGE_BASE_PATH = resolve(process.cwd(), "src", "mastra", "knowledge");
 function isKnowledgePath(path) {
   const absolutePath = resolve(path);
@@ -4158,13 +4256,20 @@ const editFileTool = createTool({
       let newContent;
       if (context.isRegex) {
         const regex = new RegExp(context.search, "g");
-        newContent = content.replace(regex, (match) => {
+        const contentStr = typeof content === "string" ? content : content.toString(context.encoding || "utf8");
+        newContent = contentStr.replace(regex, function(match, ...args) {
           edits++;
-          return context.replace;
+          let result = context.replace;
+          for (let i = 1; i < args.length - 1; i++) {
+            result = result.replace(new RegExp("\\$" + i, "g"), args[i - 1] ?? "");
+          }
+          result = result.replace(/\$0/g, match);
+          return result;
         });
       } else {
-        newContent = content.split(context.search).join(context.replace);
-        edits = (content.match(new RegExp(context.search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length;
+        const contentStr = typeof content === "string" ? content : content.toString(context.encoding || "utf8");
+        newContent = contentStr.split(context.search).join(context.replace);
+        edits = (contentStr.match(new RegExp(context.search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length;
       }
       await fs__default.writeFile(absolutePath, newContent, context.encoding);
       return {
@@ -5510,6 +5615,129 @@ const extractHtmlTextTool = createTool({
   }
 });
 
+function traced(operation, fn) {
+  const span = signoz.createSpan(operation);
+  return fn().then((result) => {
+    span.setStatus({ code: 1 });
+    span.end();
+    return result;
+  }).catch((error) => {
+    span.setStatus({ code: 2, message: error?.message || String(error) });
+    logWithTraceContext(console, "error", `${operation} failed`, { error });
+    span.end();
+    throw error;
+  });
+}
+try {
+  new Redis({
+    url: `https://${process.env.UPSTASH_REDIS_REST_URL}` || "file:.mastra/mastra.db",
+    token: process.env.UPSTASH_REDIS_REST_TOKEN || "file:.mastra/mastra.db"
+  });
+  logWithTraceContext(console, "info", "Upstash Redis client initialized", { url: process.env.UPSTASH_REDIS_REST_URL });
+} catch (error) {
+  logWithTraceContext(console, "error", "Failed to initialize Upstash Redis client", { error });
+}
+let redisStore;
+let redisMemory;
+try {
+  redisStore = new UpstashStore({
+    url: `https://${process.env.UPSTASH_REDIS_REST_URL}` || "file:.mastra/mastra.db",
+    token: process.env.UPSTASH_REDIS_REST_TOKEN || "file:.mastra/mastra.db"
+  });
+  redisMemory = new Memory({
+    storage: redisStore,
+    options: {
+      lastMessages: 100
+    }
+  });
+  logWithTraceContext(console, "info", "Upstash Redis memory initialized", { url: process.env.UPSTASH_REDIS_REST_URL });
+} catch (error) {
+  logWithTraceContext(console, "error", "Failed to initialize Upstash Redis memory", { error });
+}
+let upstashVector;
+try {
+  upstashVector = new Index({
+    url: process.env.UPSTASH_VECTOR_REST_URL,
+    token: process.env.UPSTASH_VECTOR_REST_TOKEN
+  });
+  logWithTraceContext(console, "info", "Upstash VectorDB initialized", { url: process.env.UPSTASH_VECTOR_REST_URL, index: process.env.UPSTASH_INDEX });
+} catch (error) {
+  logWithTraceContext(console, "error", "Failed to initialize Upstash VectorDB", { error });
+}
+async function vectorUpsert({ id, vector, metadata }) {
+  if (!upstashVector) throw new Error("Upstash VectorDB not initialized");
+  return traced("vector.upsert", () => upstashVector.upsert({ id, vector, metadata }));
+}
+async function vectorQuery({ query, topK = 5, filter, includeVectors = false, includeMetadata = true }) {
+  if (!upstashVector) throw new Error("Upstash VectorDB not initialized");
+  return traced("vector.query", () => upstashVector.query({
+    vector: query,
+    topK,
+    filter,
+    includeVectors,
+    includeMetadata
+  }));
+}
+
+function parseInput(input, format) {
+  switch (format) {
+    case "json":
+      return JSON.parse(input);
+    case "xml": {
+      const parser = new XMLParser();
+      return parser.parse(input);
+    }
+    case "yaml":
+      return YAML.parse(input);
+    case "txt":
+    case "md":
+      return input;
+    // passthrough for plain text and markdown
+    case "sqlite":
+    case "db": {
+      const db = new Database(input, { readonly: true });
+      const rows = db.prepare("SELECT * FROM memory").all();
+      db.close();
+      return rows;
+    }
+    default:
+      throw new Error(`Unsupported format: ${format}`);
+  }
+}
+function stringifyOutput(obj, format) {
+  switch (format) {
+    case "json":
+      return JSON.stringify(obj, null, 2);
+    case "xml": {
+      const builder = new XMLBuilder();
+      return builder.build(obj);
+    }
+    case "yaml":
+      return YAML.stringify(obj);
+    case "txt":
+    case "md":
+      return typeof obj === "string" ? obj : String(obj);
+    // passthrough
+    default:
+      throw new Error(`Unsupported format: ${format}`);
+  }
+}
+
+const DEFAULT_KG_PATH = path.resolve(process.cwd(), "knowledge-graph.json");
+async function createKnowledgeGraphFile(kg, filePath = DEFAULT_KG_PATH) {
+  await fs__default.writeFile(filePath, stringifyOutput(kg, "json"), "utf-8");
+  return filePath;
+}
+async function readKnowledgeGraphFile(filePath = DEFAULT_KG_PATH) {
+  const raw = await fs__default.readFile(filePath, "utf-8");
+  return parseInput(raw, "json");
+}
+function ensureKnowledgeGraphFile(filePath = DEFAULT_KG_PATH) {
+  if (!fs__default.existsSync(filePath)) {
+    fs__default.writeFileSync(filePath, stringifyOutput({ entities: [], relationships: [] }, "json"), "utf-8");
+  }
+}
+
 function createLlamaIndexTools(...aiFunctionLikeTools) {
   const fns = new AIFunctionSet(aiFunctionLikeTools);
   return fns.map(
@@ -5521,6 +5749,238 @@ function createLlamaIndexTools(...aiFunctionLikeTools) {
     })
   );
 }
+function createMastraLlamaIndexTools(...aiFunctionLikeTools) {
+  return createMastraTools(...aiFunctionLikeTools);
+}
+const llamaindex_query_vector_store = {
+  id: "llamaindex_query_vector_store",
+  description: "Query the LlamaIndex vector store for relevant documents given a query string.",
+  inputSchema: z.object({
+    query: z.string().describe("The query string to search for relevant documents."),
+    topK: z.number().optional().default(5).describe("Number of top results to return.")
+  }),
+  outputSchema: z.object({
+    results: z.array(z.object({
+      id: z.string(),
+      score: z.number(),
+      text: z.string()
+    })),
+    tokenCount: z.number(),
+    success: z.boolean(),
+    error: z.string().optional()
+  }),
+  execute: async ({ context }) => {
+    let tokenCount = 0;
+    try {
+      const encoder = encodingForModel("o200k_base");
+      if (!encoder) {
+        throw new Error("Missing encoding/model");
+      }
+      tokenCount = encoder.encode(typeof context.query === "string" ? context.query : JSON.stringify(context.query)).length;
+    } catch (err) {
+      return { results: [], tokenCount: 0, success: false, error: "Tokenization failed: " + (err instanceof Error ? err.message : String(err)) };
+    }
+    try {
+      const results = await vectorQuery({ query: context.query, topK: context.topK || 5 });
+      const docs = Array.isArray(results) ? results : results?.matches || [];
+      return { results: docs, tokenCount, success: true };
+    } catch (error) {
+      return { results: [], tokenCount, success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  },
+  // Dummy properties to satisfy AIFunctionLike
+  parseInput: (input) => input,
+  spec: {
+    name: "llamaindex_query_vector_store",
+    description: "Query the LlamaIndex vector store for relevant documents given a query string.",
+    parameters: zodToJsonSchema$1(z.object({
+      query: z.string().describe("The query string to search for relevant documents."),
+      topK: z.number().optional().default(5).describe("Number of top results to return.")
+    })),
+    // Always JSON Schema
+    type: "function",
+    strict: true
+  }
+};
+const llamaindex_add_document = {
+  id: "llamaindex_add_document",
+  description: "Add a document to the LlamaIndex vector store.",
+  inputSchema: z.object({
+    id: z.string().describe("Unique document ID."),
+    text: z.string().describe("Document text to index.")
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    error: z.string().optional()
+  }),
+  execute: async ({ context }) => {
+    let tokenCount = 0;
+    try {
+      const encoder = encodingForModel("o200k_base");
+      tokenCount = encoder.encode(context.text).length;
+    } catch (err) {
+      return { success: false, tokenCount: 0, error: "Tokenization failed: " + (err instanceof Error ? err.message : String(err)) };
+    }
+    try {
+      const vectorTool = createMastraVectorQueryTool({ embeddingProvider: "google" });
+      const embeddingResult = await vectorTool.model.doEmbed({ values: [context.text] });
+      const realVector = embeddingResult.embeddings[0].embedding;
+      await vectorUpsert({ id: context.id, vector: realVector, metadata: { text: context.text } });
+      return { success: true, tokenCount };
+    } catch (error) {
+      return { success: false, tokenCount, error: error instanceof Error ? error.message : String(error) };
+    }
+  },
+  parseInput: (input) => input,
+  spec: {
+    name: "llamaindex_add_document",
+    description: "Add a document to the LlamaIndex vector store.",
+    parameters: zodToJsonSchema$1(z.object({
+      id: z.string().describe("Unique document ID."),
+      text: z.string().describe("Document text to index.")
+    })),
+    // Always JSON Schema
+    type: "function",
+    strict: true
+  }
+};
+const llamaindex_delete_document = {
+  id: "llamaindex_delete_document",
+  description: "Delete a document from the LlamaIndex vector store.",
+  inputSchema: z.object({
+    id: z.string().describe("Unique document ID to delete.")
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    error: z.string().optional()
+  }),
+  execute: async ({ context }) => {
+    try {
+      const kg = await readKnowledgeGraphFile();
+      kg.entities = kg.entities.filter((e) => e.id !== context.id);
+      kg.relationships = kg.relationships.filter((r) => r.source !== context.id && r.target !== context.id);
+      await createKnowledgeGraphFile(kg);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  },
+  parseInput: (input) => input,
+  spec: {
+    name: "llamaindex_delete_document",
+    description: "Delete a document from the LlamaIndex vector store.",
+    parameters: zodToJsonSchema$1(z.object({
+      id: z.string().describe("Unique document ID to delete.")
+    })),
+    // Always JSON Schema
+    type: "function",
+    strict: true
+  }
+};
+const llamaindex_knowledge_graph_query = {
+  id: "llamaindex_knowledge_graph_query",
+  description: "Query the LlamaIndex knowledge graph for entities and relationships.",
+  inputSchema: z.object({
+    query: z.string().describe("The graph query (e.g., Cypher or natural language)."),
+    topK: z.number().optional().default(5).describe("Number of top entities/relations to return.")
+  }),
+  outputSchema: z.object({
+    entities: z.array(z.object({
+      id: z.string(),
+      label: z.string(),
+      type: z.string()
+    })),
+    relationships: z.array(z.object({
+      source: z.string(),
+      target: z.string(),
+      relation: z.string()
+    })),
+    success: z.boolean(),
+    error: z.string().optional()
+  }),
+  execute: async ({ context }) => {
+    ensureKnowledgeGraphFile();
+    if (context.action === "create") {
+      await createKnowledgeGraphFile({ entities: context.entities, relationships: context.relationships });
+      return { success: true };
+    } else if (context.action === "read") {
+      const kg = await readKnowledgeGraphFile();
+      return { ...kg, success: true };
+    } else if (context.action === "add_entity") {
+      const kg = await readKnowledgeGraphFile();
+      kg.entities.push(context.entity);
+      await createKnowledgeGraphFile(kg);
+      return { success: true };
+    } else if (context.action === "add_relationship") {
+      const kg = await readKnowledgeGraphFile();
+      kg.relationships.push(context.relationship);
+      await createKnowledgeGraphFile(kg);
+      return { success: true };
+    } else {
+      return { success: false, error: "Unknown knowledge graph action" };
+    }
+  },
+  parseInput: (input) => input,
+  spec: {
+    name: "llamaindex_knowledge_graph_query",
+    description: "Query the LlamaIndex knowledge graph for entities and relationships.",
+    parameters: zodToJsonSchema$1(z.object({
+      query: z.string().describe("The graph query (e.g., Cypher or natural language)."),
+      topK: z.number().optional().default(5).describe("Number of top entities/relations to return.")
+    })),
+    // Always JSON Schema
+    type: "function",
+    strict: true
+  }
+};
+const llamaindex_image_captioning = {
+  id: "llamaindex_image_captioning",
+  description: "Generate a caption for a given image using LlamaIndex's multimodal capabilities.",
+  inputSchema: z.object({
+    imageUrl: z.string().url().describe("URL of the image to caption.")
+  }),
+  outputSchema: z.object({
+    caption: z.string(),
+    success: z.boolean(),
+    error: z.string().optional()
+  }),
+  execute: async ({ context }) => {
+    return { caption: "", success: false, error: "Image captioning not implemented." };
+  },
+  parseInput: (input) => input,
+  spec: {
+    name: "llamaindex_image_captioning",
+    description: "Generate a caption for a given image using LlamaIndex's multimodal capabilities.",
+    parameters: zodToJsonSchema$1(z.object({
+      imageUrl: z.string().url().describe("URL of the image to caption.")
+    })),
+    // Always JSON Schema
+    type: "function",
+    strict: true
+  }
+};
+const llamaTools = [
+  llamaindex_query_vector_store,
+  llamaindex_add_document,
+  llamaindex_delete_document,
+  llamaindex_knowledge_graph_query,
+  llamaindex_image_captioning
+];
+for (const tool of llamaTools) {
+  tool.outputSchema = tool.outputSchema;
+}
+function makeAIFunctionLike(toolObj) {
+  const fn = (input) => toolObj.execute({ context: input });
+  fn.inputSchema = toolObj.inputSchema;
+  fn.parseInput = toolObj.parseInput;
+  fn.spec = toolObj.spec;
+  fn.execute = toolObj.execute;
+  fn.outputSchema = toolObj.outputSchema;
+  return fn;
+}
+createMastraLlamaIndexTools(
+  ...llamaTools.map(makeAIFunctionLike)
+);
 
 function hasProp(target, key) {
   return Boolean(target) && Object.prototype.hasOwnProperty.call(target, key);
@@ -8082,12 +8542,6 @@ const PuppeteerOutputSchema = z.object({
   pageTitle: z.string().optional().describe("The title of the web page after actions."),
   scrapedData: z.array(z.any()).optional().describe("Data scraped or returned by evaluate actions."),
   screenshotPath: z.string().optional().describe("Absolute path to the saved screenshot file, if taken."),
-  // --- Updated fields for knowledge save status ---
-  knowledgeSavePath: z.string().optional().describe("Full path where scraped data was saved in the knowledge base, if requested."),
-  // Renamed
-  saveSuccess: z.boolean().optional().describe("Indicates if saving scraped data to knowledge base was successful."),
-  saveError: z.string().optional().describe("Error message if saving scraped data to knowledge base failed."),
-  // --- End updated fields ---
   success: z.boolean().describe("Whether the overall operation was successful."),
   error: z.string().optional().describe("Error message if the operation failed.")
 });
@@ -8095,13 +8549,7 @@ const PuppeteerInputSchema = z.object({
   url: z.string().url().describe("The initial URL of the web page to navigate to."),
   screenshot: z.boolean().optional().default(false).describe("Whether to take a full-page screenshot at the end."),
   initialWaitForSelector: z.string().optional().describe("A CSS selector to wait for after initial navigation."),
-  actions: z.array(ActionSchema).optional().describe("A sequence of actions to perform on the page."),
-  // --- Fields for saving to knowledge base ---
-  saveKnowledgeFilename: z.string().optional().describe("Optional filename (e.g., 'scraped_results.json') to save scraped data within the knowledge base."),
-  saveFormat: z.enum(["json", "csv"]).optional().default("json").describe("Format to save the scraped data (default: json)."),
-  saveMode: z.nativeEnum(FileWriteMode).optional().default(FileWriteMode.OVERWRITE).describe("Write mode for saving data (overwrite, append, create-new)."),
-  saveEncoding: z.nativeEnum(FileEncoding).optional().default(FileEncoding.UTF8).describe("Encoding for saving data.")
-  // --- End fields ---
+  actions: z.array(ActionSchema).optional().describe("A sequence of actions to perform on the page.")
 });
 const puppeteerTool = createTool({
   id: "puppeteer_web_automator",
@@ -8109,13 +8557,12 @@ const puppeteerTool = createTool({
   inputSchema: PuppeteerInputSchema,
   outputSchema: PuppeteerOutputSchema,
   execute: async (executionContext) => {
-    const { context: input, container } = executionContext;
+    const { context: input} = executionContext;
     const span = createAISpan("puppeteer_tool_execution", {
       "tool.id": "puppeteer_web_automator",
       "input.url": input.url,
       "input.actions_count": input.actions?.length ?? 0,
-      "input.screenshot_requested": input.screenshot ?? false,
-      "input.save_requested": !!input.saveKnowledgeFilename
+      "input.screenshot_requested": input.screenshot ?? false
     });
     let browser = null;
     const output = {
@@ -8261,9 +8708,8 @@ const puppeteerTool = createTool({
                 }
                 break;
               default:
-                const _exhaustiveCheck = action;
-                logger$l.error("Unsupported action type encountered", { action: _exhaustiveCheck });
-                throw new Error(`Unsupported action type encountered: ${JSON.stringify(_exhaustiveCheck)}`);
+                logger$l.error("Unsupported action type encountered", { action });
+                throw new Error(`Unsupported action type encountered: ${JSON.stringify(action)}`);
             }
           } catch (actionError) {
             const errorMsg = `Error during action ${index + 1} (${action.type}): ${actionError.message}`;
@@ -8281,59 +8727,6 @@ const puppeteerTool = createTool({
         const screenshotPath = path.join(SCREENSHOT_DIR, filename);
         await page.screenshot({ path: screenshotPath, fullPage: true });
         output.screenshotPath = screenshotPath;
-      }
-      if (input.saveKnowledgeFilename && output.scrapedData && output.scrapedData.length > 0) {
-        span.addEvent("Saving scraped data", { filename: input.saveKnowledgeFilename, count: output.scrapedData.length });
-        let contentToSave = "";
-        try {
-          if (input.saveFormat === "json") {
-            contentToSave = JSON.stringify(output.scrapedData, null, 2);
-          } else if (input.saveFormat === "csv") {
-            if (output.scrapedData.every((item) => typeof item === "object" && item !== null)) {
-              const headers = Object.keys(output.scrapedData[0]).join(",");
-              const rows = output.scrapedData.map(
-                (item) => Object.values(item).map((val) => JSON.stringify(val)).join(",")
-              );
-              contentToSave = `${headers}
-${rows.join("\n")}`;
-            } else {
-              throw new Error("CSV format requires scraped data to be an array of objects.");
-            }
-          } else {
-            throw new Error(`Unsupported save format: ${input.saveFormat}`);
-          }
-          if (!writeKnowledgeFileTool?.execute) {
-            throw new Error("writeKnowledgeFileTool.execute is not defined or tool not imported correctly.");
-          }
-          const writeResult = await writeKnowledgeFileTool.execute({
-            context: {
-              path: input.saveKnowledgeFilename,
-              content: contentToSave,
-              mode: input.saveMode,
-              encoding: input.saveEncoding,
-              createDirectory: true
-            },
-            container
-          });
-          if (writeResult.success) {
-            span.setAttribute("output.save_path", writeResult.metadata.path);
-            span.addEvent("Save successful");
-            output.knowledgeSavePath = writeResult.metadata.path;
-            output.saveSuccess = true;
-            logger$l.info(`Successfully saved scraped data to knowledge base: ${output.knowledgeSavePath}`);
-          } else {
-            span.addEvent("Save failed", { error: output.saveError });
-            output.saveSuccess = false;
-            output.saveError = writeResult.error || "Unknown error saving to knowledge base.";
-            logger$l.error(`Failed to save scraped data to knowledge base: ${output.saveError}`);
-          }
-        } catch (saveError) {
-          output.saveSuccess = false;
-          output.saveError = saveError instanceof Error ? saveError.message : String(saveError);
-          logger$l.error(`Error preparing or saving scraped data to knowledge base: ${output.saveError}`);
-        }
-      } else if (input.saveKnowledgeFilename) {
-        logger$l.warn(`Knowledge base filename provided (${input.saveKnowledgeFilename}), but no scraped data to save.`);
       }
       output.success = true;
       logger$l.info("Puppeteer automation completed successfully.");
@@ -8645,7 +9038,7 @@ logger$k.info(`AI SDK tools included: ${extraTools.some((t) => t.id.startsWith("
 console.log("All available tool IDs:", Array.from(allToolsMap.keys()));
 
 initializeDefaultTracing();
-const { tracer: signozTracer, meterProvider } = initSigNoz({
+const { tracer: signozTracer$1, meterProvider: meterProvider$1 } = initSigNoz({
   serviceName: "agent-initialization",
   export: {
     type: "otlp",
@@ -8654,11 +9047,11 @@ const { tracer: signozTracer, meterProvider } = initSigNoz({
     metricsInterval: 6e4
   }
 });
-const agentMeter = meterProvider?.getMeter ? meterProvider.getMeter("agent-metrics") : void 0;
-const agentCreationCounter = agentMeter?.createCounter("agent.creation.count", {
+const agentMeter$1 = meterProvider$1?.getMeter ? meterProvider$1.getMeter("agent-metrics") : void 0;
+const agentCreationCounter$1 = agentMeter$1?.createCounter("agent.creation.count", {
   description: "Number of agents created"
 });
-const agentCreationLatency = agentMeter?.createHistogram("agent.creation.latency_ms", {
+const agentCreationLatency$1 = agentMeter$1?.createHistogram("agent.creation.latency_ms", {
   description: "Time taken to create an agent"
 });
 const baseLogger = createLogger({ name: "agent-initialization", level: "debug" });
@@ -8667,25 +9060,25 @@ const logger$j = {
     baseLogger.debug(msg, meta);
     upstashLogger.debug({ message: msg, ...meta });
     fileLogger.debug(String(msg), meta);
-    signozTracer?.startSpan("agent.debug").end();
+    signozTracer$1?.startSpan("agent.debug").end();
   },
   info: (msg, meta) => {
     baseLogger.info(msg, meta);
     upstashLogger.info({ message: msg, ...meta });
     fileLogger.info(String(msg), meta);
-    signozTracer?.startSpan("agent.info").end();
+    signozTracer$1?.startSpan("agent.info").end();
   },
   warn: (msg, meta) => {
     baseLogger.warn(msg, meta);
     upstashLogger.warn({ message: msg, ...meta });
     fileLogger.warn(String(msg), meta);
-    signozTracer?.startSpan("agent.warn").end();
+    signozTracer$1?.startSpan("agent.warn").end();
   },
   error: (msg, meta) => {
     baseLogger.error(msg, meta);
     upstashLogger.error({ message: msg, ...meta });
     fileLogger.error(String(msg), meta);
-    signozTracer?.startSpan("agent.error").end();
+    signozTracer$1?.startSpan("agent.error").end();
   }
 };
 function createAgentFromConfig({
@@ -8694,7 +9087,7 @@ function createAgentFromConfig({
   onError
 }) {
   const start = Date.now();
-  const span = signozTracer?.startSpan("agent.create", {
+  const span = signozTracer$1?.startSpan("agent.create", {
     attributes: { agent_id: config.id }
   });
   if (!config.id || !config.name || !config.instructions) {
@@ -8744,23 +9137,312 @@ function createAgentFromConfig({
   }
   span?.setStatus({ code: api.SpanStatusCode.OK });
   span?.end();
-  agentCreationCounter?.add(1, { agent_id: config.id });
-  agentCreationLatency?.record(Date.now() - start, { agent_id: config.id });
+  agentCreationCounter$1?.add(1, { agent_id: config.id });
+  agentCreationLatency$1?.record(Date.now() - start, { agent_id: config.id });
   return agent;
 }
 
-const logger$i = createLogger({ name: "research-agent", level: "debug" });
-const researchAgent = createAgentFromConfig({
-  config: researchAgentConfig,
-  memory: sharedMemory,
-  // Following RULE-MemoryInjection
-  onError: async (error) => {
+const defaultSharedMemory = redisMemory ?? sharedMemory;
+const runMiddleware = async (middleware, context) => {
+  for (const fn of middleware) {
+    await fn(context);
+  }
+};
+initializeDefaultTracing();
+const { tracer: signozTracer, meterProvider } = initSigNoz({
+  serviceName: "advanced-agent-initialization",
+  export: {
+    type: "otlp",
+    endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+    headers: {},
+    metricsInterval: 6e4
+  }
+});
+const agentMeter = meterProvider?.getMeter ? meterProvider.getMeter("advanced-agent-metrics") : void 0;
+const agentCreationCounter = agentMeter?.createCounter("advanced.agent.creation.count", {
+  description: "Number of advanced agents created"
+});
+const agentCreationLatency = agentMeter?.createHistogram("advanced.agent.creation.latency_ms", {
+  description: "Time taken to create an advanced agent"
+});
+const createAdvancedAgent = (config, options = {}, memory = defaultSharedMemory, onEvent, onError, preHooks = [], postHooks = [], maxRetries = 0) => {
+  const agentLogger = createLogger({ name: config.name || "AdvancedAgent" });
+  const enableTracing = options.enableTracing ?? true;
+  const start = Date.now();
+  const span = signozTracer?.startSpan("advanced.agent.create", {
+    attributes: { agent_id: config.id }
+  });
+  const streamHooks = createStreamHooks(enableTracing);
+  const tools = {};
+  const missingTools = [];
+  for (const toolId of config.toolIds || []) {
+    const tool = allToolsMap.get(toolId);
+    if (tool) {
+      tools[toolId] = tool;
+      const toolName = typeof tool === "string" ? tool : tool.id || tool?.name;
+      if (toolName) {
+        agentLogger.debug(`Instantiating tool hooks for: ${toolName}`);
+      }
+    } else {
+      missingTools.push(toolId);
+    }
+  }
+  if (missingTools.length > 0) {
+    const errorMessage = `Missing required tools for agent ${config.id}: ${missingTools.join(", ")}`;
+    agentLogger.error(errorMessage);
+    throw new Error(errorMessage);
+  }
+  createModelInstance(config.modelConfig);
+  let baseAgent;
+  try {
+    baseAgent = createAgentFromConfig({
+      config: {
+        ...config,
+        modelConfig: config.modelConfig,
+        responseValidation: config.responseValidation
+        // All other config fields are spread
+      },
+      memory,
+      onError
+    });
+  } catch (error) {
+    span?.setStatus({ code: SpanStatusCode$1.ERROR, message: error.message });
+    span?.end();
+    throw error;
+  }
+  span?.setStatus({ code: SpanStatusCode$1.OK });
+  span?.end();
+  agentCreationCounter?.add(1, { agent_id: config.id });
+  agentCreationLatency?.record(Date.now() - start, { agent_id: config.id });
+  const advancedAgentBase = baseAgent;
+  advancedAgentBase.state = {};
+  advancedAgentBase.onEvent = onEvent;
+  advancedAgentBase.setState = (newState) => {
+    advancedAgentBase.state = { ...advancedAgentBase.state, ...newState };
+  };
+  advancedAgentBase.getState = () => advancedAgentBase.state;
+  advancedAgentBase.originalGenerate = baseAgent.generate.bind(baseAgent);
+  if (baseAgent.stream) {
+    advancedAgentBase.originalStream = baseAgent.stream.bind(baseAgent);
+  }
+  const generateImplementation = async (messages, args) => {
+    const agent = advancedAgentBase;
+    const span2 = createAISpan(`${agent.name || "AdvancedAgent"}.generate`, { enableTracing });
+    const effectiveMaxAttempts = Math.max(1, (maxRetries >= 0 ? maxRetries : 0) + 1);
+    span2.setAttributes({
+      "mastra.agent.name": agent.name || "AdvancedAgent",
+      "mastra.agent.model": agent.model?.modelId || "unknown",
+      "mastra.operation.type": "generate",
+      "mastra.retry.max_attempts": effectiveMaxAttempts
+    });
+    let attempt = 0;
+    let lastError = null;
+    while (attempt < effectiveMaxAttempts) {
+      const currentAttempt = attempt + 1;
+      span2.addEvent(`Attempt ${currentAttempt}/${effectiveMaxAttempts} starting.`);
+      const context = {
+        messages,
+        args,
+        state: agent.getState(),
+        tools,
+        // Use the resolved tools map
+        memory,
+        agent
+      };
+      const messageSchema = z.union([
+        z.string(),
+        z.array(z.string()),
+        z.array(z.any())
+        // fallback for CoreMessage[] | Message[]
+      ]);
+      const argsSchema = z.any();
+      const parsedMessages = messageSchema.safeParse(messages);
+      if (!parsedMessages.success) {
+        throw new Error("Invalid messages format: " + parsedMessages.error.message);
+      }
+      if (args !== void 0) {
+        const parsedArgs = argsSchema.safeParse(args);
+        if (!parsedArgs.success) {
+          throw new Error("Invalid args format: " + parsedArgs.error.message);
+        }
+      }
+      try {
+        await runMiddleware(preHooks, context);
+        const result = await agent.originalGenerate(messages, args);
+        const agentResultSchema = z.object({
+          text: z.string().optional(),
+          object: z.unknown().optional(),
+          error: z.string().optional()
+        }).passthrough();
+        const parsedResult = agentResultSchema.safeParse(result);
+        if (!parsedResult.success) {
+          throw new Error("Invalid agent result format: " + parsedResult.error.message);
+        }
+        createResponseHook({ enableTracing })(result);
+        context.result = result;
+        await runMiddleware(postHooks, context);
+        recordMetrics(span2, { status: "success" });
+        span2.setStatus({ code: SpanStatusCode$1.OK });
+        span2.addEvent("generate.success");
+        agent.onEvent?.("success", { result, attempt: currentAttempt });
+        span2.end();
+        return result;
+      } catch (err) {
+        lastError = err;
+        agentLogger.error(`Attempt ${currentAttempt}/${effectiveMaxAttempts} failed:`, lastError);
+        span2.recordException(lastError);
+        span2.addEvent(`Attempt ${currentAttempt} failed.`, { "error.message": lastError.message });
+        attempt++;
+        if (attempt >= effectiveMaxAttempts) {
+          span2.addEvent(`All ${effectiveMaxAttempts} attempts failed.`);
+          agentLogger.error(`Agent generation failed after ${effectiveMaxAttempts} attempts.`);
+          break;
+        }
+      }
+    }
+    const finalError = lastError;
+    span2.setStatus({ code: SpanStatusCode$1.ERROR, message: finalError.message });
+    recordMetrics(span2, { status: "error", errorMessage: finalError.message });
+    agent.onEvent?.("error", { error: finalError, attempts: effectiveMaxAttempts });
+    span2.end();
+    if (onError) {
+      try {
+        agentLogger.warn(`Invoking onError handler for error: ${finalError.message}`);
+        const errorResponse = await onError(finalError);
+        return {
+          text: errorResponse.text || `Error occurred: ${finalError.message}`,
+          toolCalls: [],
+          toolResults: [],
+          finishReason: "error",
+          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+        };
+      } catch (onErrorError) {
+        agentLogger.error("Error within onError handler:", onErrorError);
+        throw onErrorError;
+      }
+    } else {
+      const errorResponse = await defaultErrorHandler(finalError);
+      return {
+        text: errorResponse.text || `Error occurred: ${finalError.message}`,
+        toolCalls: [],
+        toolResults: [],
+        finishReason: "error",
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+      };
+    }
+  };
+  const streamImplementation = async (messages, streamOptions) => {
+    const agent = advancedAgentBase;
+    if (!agent.originalStream) {
+      throw new Error(`Agent ${agent.name || "AdvancedAgent"} does not support streaming.`);
+    }
+    const span2 = createAISpan(`${agent.name || "AdvancedAgent"}.stream`, { enableTracing });
+    span2.setAttributes({
+      "mastra.agent.name": agent.name || "AdvancedAgent",
+      "mastra.agent.model": agent.model?.modelId || "unknown",
+      "mastra.operation.type": "stream"
+    });
+    const context = {
+      messages,
+      args: streamOptions,
+      state: agent.getState(),
+      tools,
+      // Use the resolved tools map
+      memory,
+      agent
+    };
+    let streamResultHolder = null;
+    try {
+      await runMiddleware(preHooks, context);
+      const { context: originalContext} = streamOptions || {};
+      let filteredContextForHook = void 0;
+      if (originalContext) {
+        filteredContextForHook = originalContext.filter(
+          (msg) => msg.role === "system" || msg.role === "user" || msg.role === "assistant"
+        );
+      }
+      await streamHooks.onStreamStart({ context: filteredContextForHook });
+      const wrapStream = async function* (inputStream) {
+        if (!inputStream) return void 0;
+        let streamEndedSuccessfully = false;
+        try {
+          for await (const chunk of inputStream) {
+            yield chunk;
+          }
+          streamEndedSuccessfully = true;
+        } catch (streamError) {
+          agentLogger.error("Error during stream iteration:", streamError);
+          await streamHooks.onStreamError(streamError);
+          span2.setStatus({ code: SpanStatusCode$1.ERROR, message: streamError.message });
+          span2.recordException(streamError);
+          agent.onEvent?.("stream.error", { error: streamError });
+          throw streamError;
+        } finally {
+          if (streamEndedSuccessfully) {
+            await streamHooks.onStreamEnd(streamResultHolder);
+            await runMiddleware(postHooks, context);
+            span2.setStatus({ code: SpanStatusCode$1.OK });
+            span2.addEvent("stream.success");
+            agent.onEvent?.("stream.success", { result: streamResultHolder });
+          }
+          span2.end();
+        }
+      };
+      const streamResult = await agent.originalStream(messages, streamOptions);
+      streamResultHolder = streamResult;
+      context.result = streamResult;
+      return {
+        ...streamResult,
+        textStream: wrapStream(streamResult.textStream) ?? async function* () {
+          yield "";
+        }(),
+        partialObjectStream: wrapStream(streamResult.experimental_partialOutputStream)
+      };
+    } catch (initialError) {
+      agentLogger.error("Error setting up stream:", initialError);
+      await streamHooks.onStreamError(initialError);
+      span2.setStatus({ code: SpanStatusCode$1.ERROR, message: initialError.message });
+      span2.recordException(initialError);
+      agent.onEvent?.("stream.error", { error: initialError });
+      span2.end();
+      throw initialError;
+    }
+  };
+  const finalAgent = {
+    ...advancedAgentBase,
+    generate: generateImplementation,
+    ...advancedAgentBase.originalStream && { stream: streamImplementation },
+    __registerMastra(mastraInstance) {
+      Object.defineProperty(this, "_mastraInstance", {
+        value: mastraInstance,
+        writable: true,
+        enumerable: false,
+        configurable: true
+      });
+      if (mastraInstance.memory && typeof mastraInstance.memory.createForAgent === "function" && this.id) {
+        this.memory = mastraInstance.memory.createForAgent(this.id);
+      }
+    }
+  };
+  return finalAgent;
+};
+
+const logger$i = createLogger$1({ name: "research-agent", level: "debug" });
+const researchAgent = createAdvancedAgent(
+  researchAgentConfig,
+  { enableTracing: true },
+  // advanced options
+  sharedMemory,
+  void 0,
+  // onEvent (optional)
+  async (error) => {
     logger$i.error("Research agent error:", error);
     return {
       text: "I encountered an error during research. Please refine your query or check the available sources."
     };
   }
-});
+  // Optionally, you can pass preHooks and postHooks arrays here as well
+);
 
 const logger$h = createLogger({ name: "analyst-agent", level: "debug" });
 const analystAgent = createAgentFromConfig({
@@ -8788,7 +9470,7 @@ const writerAgent = createAgentFromConfig({
   }
 });
 
-const logger$f = createLogger({ name: "rl-trainer-agent", level: "debug" });
+const logger$f = createLogger$1({ name: "rl-trainer-agent", level: "debug" });
 const rlTrainerAgent = createAgentFromConfig({
   config: rlTrainerAgentConfig,
   memory: sharedMemory,
@@ -8801,7 +9483,7 @@ const rlTrainerAgent = createAgentFromConfig({
   }
 });
 
-const logger$e = createLogger({ name: "data-manager-agent", level: "debug" });
+const logger$e = createLogger$1({ name: "data-manager-agent", level: "debug" });
 const dataManagerAgent = createAgentFromConfig({
   config: dataManagerAgentConfig,
   memory: sharedMemory,
@@ -8851,7 +9533,7 @@ function initializeCoderAgent() {
 }
 const coderAgent = initializeCoderAgent();
 
-const logger$b = createLogger({ name: "copywriter-agent", level: "debug" });
+const logger$b = createLogger$1({ name: "copywriter-agent", level: "debug" });
 function initializeCopywriterAgent() {
   logger$b.info("Initializing copywriter agent");
   try {
@@ -8888,7 +9570,7 @@ const architectAgent = createAgentFromConfig({
   }
 });
 
-const logger$9 = createLogger({ name: "debugger-agent", level: "debug" });
+const logger$9 = createLogger$1({ name: "debugger-agent", level: "debug" });
 const debuggerAgent = createAgentFromConfig({
   config: debuggerConfig,
   memory: sharedMemory,
@@ -8927,7 +9609,7 @@ const codeDocumenterAgent = createAgentFromConfig({
   }
 });
 
-const logger$6 = createLogger({ name: "market-research-agent", level: "debug" });
+const logger$6 = createLogger$1({ name: "market-research-agent", level: "debug" });
 const marketResearchAgent = createAgentFromConfig({
   config: marketResearchAgentConfig,
   memory: sharedMemory,

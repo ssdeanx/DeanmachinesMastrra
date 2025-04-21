@@ -123,33 +123,26 @@ export const calculateRewardTool = createTool({
     rewardId: z.string().optional(),
     error: z.string().optional(),
   }),
-  execute: async ({ context }) => {
-    const span = sigNoz.createSpan("rl.calculateReward", {
-      agentId: context.agentId,
-      episodeId: context.episodeId,
-      stepNumber: context.stepNumber || 0,
-    });
+  execute: async ({ input }) => {
+    // Validate input
+    const parsedInput = calculateRewardTool.inputSchema.safeParse(input);
+    if (!parsedInput.success) throw new Error(`Invalid input: ${parsedInput.error}`);
+    const { agentId, episodeId, state, action, context: actionContext, rewardFunctionId, stepNumber = 0, isTerminal = false } = parsedInput.data;
+    const span = sigNoz.createSpan("rl.calculateReward", { agentId, episodeId, stepNumber });
     const startTime = performance.now();
     try {
       // Create the state-action pair
-      const stateAction: StateAction = {
-        state: context.state,
-        action: context.action,
-        context: context.context,
-      };
+      const stateAction: StateAction = { state, action, context: actionContext };
 
       // Calculate the reward based on the state-action pair
-      const { reward, breakdown } = await calculateStateActionReward(
-        stateAction,
-        context.rewardFunctionId
-      );
+      const { reward, breakdown } = await calculateStateActionReward(stateAction, rewardFunctionId);
 
       // Generate a unique ID for this reward record
-      const rewardId = `reward_${context.agentId}_${Date.now()}`;
+      const rewardId = `reward_${agentId}_${Date.now()}`;
 
       // Get previous cumulative reward by querying the episode thread
       let cumulativeReward = reward;
-      const episodeThreadId = `rl_episode_${context.agentId}_${context.episodeId}`;
+      const episodeThreadId = `rl_episode_${agentId}_${episodeId}`;
 
       try {
         // Create or get thread for this episode
@@ -182,17 +175,14 @@ export const calculateRewardTool = createTool({
       // Create the reward record
       const rewardRecord: RewardRecord = {
         timestamp: new Date().toISOString(),
-        agentId: context.agentId,
-        episodeId: context.episodeId,
+        agentId,
+        episodeId,
         stateAction,
         reward,
         cumulativeReward,
-        stepNumber: context.stepNumber || 0,
-        isTerminal: context.isTerminal || false,
-        metadata: {
-          rewardFunctionId: context.rewardFunctionId,
-          breakdown,
-        },
+        stepNumber,
+        isTerminal,
+        metadata: { rewardFunctionId, breakdown },
       };
 
       // Store the reward record as a message in the thread
@@ -203,19 +193,19 @@ export const calculateRewardTool = createTool({
         type: "rl_reward",
         reward,
         cumulativeReward,
-        stepNumber: context.stepNumber || 0,
-        isTerminal: context.isTerminal || false,
+        stepNumber,
+        isTerminal,
       });
 
       await sharedMemory.addMessage({
         threadId: episodeThreadId,
-        resourceId: context.agentId, // Add the resourceId
+        resourceId: agentId,
         role: "assistant",
         content: messageContent,
         type: "text",
       });
 
-      const result = {
+      const rawResult = {
         reward,
         cumulativeReward,
         normalizedReward: normalizeReward(reward),
@@ -223,6 +213,12 @@ export const calculateRewardTool = createTool({
         success: true,
         rewardId,
       };
+
+      // Validate output
+      const parsedOutput = calculateRewardTool.outputSchema.safeParse(rawResult);
+      if (!parsedOutput.success) throw new Error(`Invalid output: ${parsedOutput.error}`);
+
+      const result = parsedOutput.data;
 
       sigNoz.recordMetrics(span, {
         latencyMs: performance.now() - startTime,

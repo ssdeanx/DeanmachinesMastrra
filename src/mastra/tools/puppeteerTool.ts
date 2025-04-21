@@ -100,11 +100,6 @@ const PuppeteerOutputSchema = z.object({
     pageTitle: z.string().optional().describe("The title of the web page after actions."),
     scrapedData: z.array(z.any()).optional().describe("Data scraped or returned by evaluate actions."),
     screenshotPath: z.string().optional().describe("Absolute path to the saved screenshot file, if taken."),
-    // --- Updated fields for knowledge save status ---
-    knowledgeSavePath: z.string().optional().describe("Full path where scraped data was saved in the knowledge base, if requested."), // Renamed
-    saveSuccess: z.boolean().optional().describe("Indicates if saving scraped data to knowledge base was successful."),
-    saveError: z.string().optional().describe("Error message if saving scraped data to knowledge base failed."),
-    // --- End updated fields ---
     success: z.boolean().describe("Whether the overall operation was successful."),
     error: z.string().optional().describe("Error message if the operation failed."),
 });
@@ -115,12 +110,6 @@ const PuppeteerInputSchema = z.object({
     screenshot: z.boolean().optional().default(false).describe("Whether to take a full-page screenshot at the end."),
     initialWaitForSelector: z.string().optional().describe("A CSS selector to wait for after initial navigation."),
     actions: z.array(ActionSchema).optional().describe("A sequence of actions to perform on the page."),
-    // --- Fields for saving to knowledge base ---
-    saveKnowledgeFilename: z.string().optional().describe("Optional filename (e.g., 'scraped_results.json') to save scraped data within the knowledge base."),
-    saveFormat: z.enum(["json", "csv"]).optional().default("json").describe("Format to save the scraped data (default: json)."),
-    saveMode: z.nativeEnum(FileWriteMode).optional().default(FileWriteMode.OVERWRITE).describe("Write mode for saving data (overwrite, append, create-new)."),
-    saveEncoding: z.nativeEnum(FileEncoding).optional().default(FileEncoding.UTF8).describe("Encoding for saving data."),
-    // --- End fields ---
 });
 
 // Infer the output type from the schema
@@ -129,7 +118,7 @@ export const puppeteerTool = createTool<typeof PuppeteerInputSchema, typeof Pupp
     description: "Navigates to a web page using Puppeteer, performs a sequence of actions (click, type, scrape, wait), optionally takes a screenshot, and returns page information and scraped data.",
     inputSchema: PuppeteerInputSchema,
     outputSchema: PuppeteerOutputSchema,
-    execute: async (executionContext) => {
+    execute: async (executionContext: { context: any; container: any; }) => {
         const { context: input, container } = executionContext;
         // Start SigNoz Span for the tool execution
         const span: Span = createAISpan('puppeteer_tool_execution', {
@@ -137,7 +126,6 @@ export const puppeteerTool = createTool<typeof PuppeteerInputSchema, typeof Pupp
             'input.url': input.url,
             'input.actions_count': input.actions?.length ?? 0,
             'input.screenshot_requested': input.screenshot ?? false,
-            'input.save_requested': !!input.saveKnowledgeFilename,
         });
 
         let browser: Browser | null = null;
@@ -302,9 +290,8 @@ export const puppeteerTool = createTool<typeof PuppeteerInputSchema, typeof Pupp
                                 break;
 
                             default:
-                                const _exhaustiveCheck: never = action;
-                                logger.error("Unsupported action type encountered", { action: _exhaustiveCheck });
-                                throw new Error(`Unsupported action type encountered: ${JSON.stringify(_exhaustiveCheck)}`);
+                                logger.error("Unsupported action type encountered", { action });
+                                throw new Error(`Unsupported action type encountered: ${JSON.stringify(action)}`);
                         }
                     } catch (actionError: any) {
                         const errorMsg = `Error during action ${index + 1} (${(action as any).type}): ${actionError.message}`;
@@ -325,63 +312,6 @@ export const puppeteerTool = createTool<typeof PuppeteerInputSchema, typeof Pupp
                 const screenshotPath = path.join(SCREENSHOT_DIR, filename);
                 await page.screenshot({ path: screenshotPath, fullPage: true });
                 output.screenshotPath = screenshotPath;
-            }
-
-            if (input.saveKnowledgeFilename && output.scrapedData && output.scrapedData.length > 0) {
-                span.addEvent('Saving scraped data', { filename: input.saveKnowledgeFilename, count: output.scrapedData.length });
-                let contentToSave = "";
-
-                try {
-                    if (input.saveFormat === "json") {
-                        contentToSave = JSON.stringify(output.scrapedData, null, 2);
-                    } else if (input.saveFormat === "csv") {
-                        if (output.scrapedData.every(item => typeof item === 'object' && item !== null)) {
-                            const headers = Object.keys(output.scrapedData[0] as object).join(',');
-                            const rows = output.scrapedData.map(item =>
-                                Object.values(item as object).map(val => JSON.stringify(val)).join(',')
-                            );
-                            contentToSave = `${headers}\n${rows.join('\n')}`;
-                        } else {
-                            throw new Error("CSV format requires scraped data to be an array of objects.");
-                        }
-                    } else {
-                        throw new Error(`Unsupported save format: ${input.saveFormat}`);
-                    }
-
-                    if (!writeKnowledgeFileTool?.execute) {
-                        throw new Error("writeKnowledgeFileTool.execute is not defined or tool not imported correctly.");
-                    }
-
-                    const writeResult = await writeKnowledgeFileTool.execute({
-                        context: {
-                            path: input.saveKnowledgeFilename,
-                            content: contentToSave,
-                            mode: input.saveMode,
-                            encoding: input.saveEncoding,
-                            createDirectory: true,
-                        },
-                        container: container
-                    });
-
-                    if (writeResult.success) {
-                        span.setAttribute('output.save_path', writeResult.metadata.path);
-                        span.addEvent('Save successful');
-                        output.knowledgeSavePath = writeResult.metadata.path;
-                        output.saveSuccess = true;
-                        logger.info(`Successfully saved scraped data to knowledge base: ${output.knowledgeSavePath}`);
-                    } else {
-                        span.addEvent('Save failed', { error: output.saveError });
-                        output.saveSuccess = false;
-                        output.saveError = writeResult.error || "Unknown error saving to knowledge base.";
-                        logger.error(`Failed to save scraped data to knowledge base: ${output.saveError}`);
-                    }
-                } catch (saveError: any) {
-                    output.saveSuccess = false;
-                    output.saveError = saveError instanceof Error ? saveError.message : String(saveError);
-                    logger.error(`Error preparing or saving scraped data to knowledge base: ${output.saveError}`);
-                }
-            } else if (input.saveKnowledgeFilename) {
-                logger.warn(`Knowledge base filename provided (${input.saveKnowledgeFilename}), but no scraped data to save.`);
             }
 
             output.success = true;

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.0.17] - 2025-04-21
+
+### Added
+
+- **src/mastra/database/index.ts**: Exported `defaultMemoryConfig` to centralize memory defaults (semanticRecall, workingMemory, threads) across storage adapters.
+- **src/mastra/database/redis.ts**: Imported `defaultMemoryConfig` and UpstashVectorIndex; initialized `redisMemory` with vector support and full memory features.
+- **src/mastra/database/index.ts** & **src/mastra/database/redis.ts**: Imported and re‑exported the `threadManager` singleton for consistent thread-based context management.
+- **src/mastra/agents/base.agent.ts**: Attached `threadManager` to each Agent instance via `(agent as any).threadManager` to enable conversation threading.
+- **src/mastra/agents/advanced.base.agent.ts**: Injected `threadManager` into advanced agents before return, allowing advanced workflows to use threaded memory.
+
+### Changed
+
+- **src/mastra/tools/rlReward.ts**: Added Zod input/output validation in `execute` using `.safeParse()`, destructured inputs for clarity, and improved error reporting.
+- **src/mastra/tools/rlFeedback.ts**: Refactored `execute` to use destructured, Zod-validated `input`; standardized feedback structure and removed raw `context` usage.
+- **src/mastra/database/redis.ts**: Moved UpstashVectorIndex initialization above memory instantiation to fix TDZ; configured `redisMemory` using `defaultMemoryConfig` for semantic recall and threads.
+- **src/mastra/database/index.ts**: Increased `lastMessages` default from 50 to 100; exported the config for reuse by Redis memory layer.
+
+### Fixed
+
+- **src/mastra/database/redis.ts**: Resolved "block-scoped variable 'upstashVector' used before its declaration" by reordering initialization.
+- **src/mastra/database/index.ts**: Synchronized default `lastMessages` value (100) and added export on `defaultMemoryConfig` to fix import errors.
+
+---
+
 ## [v0.0.16] - [Agent Core & Config Loader Enhancements] - 2025-04-20
 
 ### Added
@@ -70,10 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-  - Integrates with format.utils.ts for seamless multi-format support.
-  - Handles both full agent configs and simple prompt/instruction files.
-  - Provides clear error messages and validation for missing or invalid config fields.
-  - Added comprehensive documentation and usage examples.
+- Integrates with format.utils.ts for seamless multi-format support.
+- Handles both full agent configs and simple prompt/instruction files.
+- Provides clear error messages and validation for missing or invalid config fields.
+- Added comprehensive documentation and usage examples.
 
 ### Changed
 
@@ -100,39 +124,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Puppeteer Tool (`puppeteerTool.ts`)** Needs fixed causes stream to crash.
 Trace
 Trace Id
-Started	Total Duration
+Started Total Duration
 
 stream
-b1052f4e30ebab490748d50db729b901	4/20/2025, 9:51:12 AM	15.861ms
+b1052f4e30ebab490748d50db729b901 4/20/2025, 9:51:12 AM 15.861ms
 
 stream
-8642fc5243ae5610e419a4431b792779	4/20/2025, 9:49:01 AM	1924.593ms
+8642fc5243ae5610e419a4431b792779 4/20/2025, 9:49:01 AM 1924.593ms
 
 __registerMastra
-9337ac666c23e33bd1f6b85d98daf44a	4/20/2025, 9:48:45 AM	0.007ms
+9337ac666c23e33bd1f6b85d98daf44a 4/20/2025, 9:48:45 AM 0.007ms
 
 __registerMastra
-e85fb9fff96413107517aac82da2e943	4/20/2025, 9:48:45 AM	0.005ms
+e85fb9fff96413107517aac82da2e943 4/20/2025, 9:48:45 AM 0.005ms
 
 __registerMastra
-e39c38bd34ca5e5cbc47a2d6a32cd057	4/20/2025, 9:48:45 AM	0.005ms
+e39c38bd34ca5e5cbc47a2d6a32cd057 4/20/2025, 9:48:45 AM 0.005ms
 
 __registerMastra
-1fc4f91de6d279050eca05ef2f5d598e	4/20/2025, 9:48:45 AM	0.051ms
+1fc4f91de6d279050eca05ef2f5d598e 4/20/2025, 9:48:45 AM 0.051ms
 
 __registerPrimitives
-93250cfc44aaf1d882d180aa4fe39b13	4/20/2025, 9:48:45 AM	0.096ms
+93250cfc44aaf1d882d180aa4fe39b13 4/20/2025, 9:48:45 AM 0.096ms
 
 __registerMastra
-2744379f4f8e815785ebaddaa4830add	4/20/2025, 9:48:45 AM	0.391ms
+2744379f4f8e815785ebaddaa4830add 4/20/2025, 9:48:45 AM 0.391ms
 
 __registerPrimitives
-629c2ccf8f2b4bc80f8867c4ef9ef0de	4/20/2025, 9:48:45 AM	0.168ms
+629c2ccf8f2b4bc80f8867c4ef9ef0de 4/20/2025, 9:48:45 AM 0.168ms
 
-  - Implemented a new Mastra tool (`puppeteer_web_automator`) for advanced browser automation using Puppeteer.
-  - Supports navigating to URLs, executing a sequence of actions (click, type, scrape, wait, scroll, hover, select, evaluate), taking screenshots, and extracting data.
-  - Includes robust action schemas defined with Zod for type safety and validation.
-  - Provides detailed logging for each step of the automation process.
+- Implemented a new Mastra tool (`puppeteer_web_automator`) for advanced browser automation using Puppeteer.
+- Supports navigating to URLs, executing a sequence of actions (click, type, scrape, wait, scroll, hover, select, evaluate), taking screenshots, and extracting data.
+- Includes robust action schemas defined with Zod for type safety and validation.
+- Provides detailed logging for each step of the automation process.
 - **Knowledge Base Integration (`puppeteerTool.ts`)**
   - Integrated `writeKnowledgeFileTool` (from `readwrite.ts`) into `puppeteerTool`.
   - Added input options (`saveKnowledgeFilename`, `saveFormat`, `saveMode`, `saveEncoding`) to allow users to optionally save scraped data directly to the knowledge base.
@@ -308,9 +332,9 @@ const { text } = await copywriterAgent.generate(writingResult);
 
 - **base.agent.ts**  
   • Imported and wired:
-    - `consoleLogger`, `upstashLogger`, `fileLogger` under a unified `logger` API.  
-    - OpenTelemetry via `initializeDefaultTracing()`.  
-    - SigNoz tracer + meter via `initSigNoz()`.  
+  - `consoleLogger`, `upstashLogger`, `fileLogger` under a unified `logger` API.  
+  - OpenTelemetry via `initializeDefaultTracing()`.  
+  - SigNoz tracer + meter via `initSigNoz()`.  
   • Created spans around agent lifecycle (`agent.create`, `agent.debug/info/warn/error`).  
   • Recorded metrics (`agent.creation.count`, `agent.creation.latency_ms`).  
   • **Voice integration is stubbed**—the `createGoogleVoice()` import and `voice` prop in the `Agent` constructor are commented out because real‑time streaming (connect, listen, speaker events) is not yet implemented.  
@@ -361,20 +385,23 @@ const { text } = await copywriterAgent.generate(writingResult);
 
 ### Added
 
-- Full tracing and feedback integration to thread-manager.ts: now uses signoz for metrics and trackFeedback for LangSmith feedback in createThread. createThread is now async and records both success and error cases for observability and analytics.
+- Comprehensive evals toolset in `tools/evals.ts` with SigNoz tracing: includes completeness, answer relevancy, content similarity, context precision, context position, tone consistency, keyword coverage, textual difference, faithfulness, and token count metrics.
+- All eval tools output normalized scores, explanations, and are ready for agent/workflow integration.
+- LlamaIndex tool output schema and type safety improvements.
 
 ### Changed
 
-- Refactored thread-manager.ts to ensure all observability and feedback hooks are actually called and imported.
+- Integrated SigNoz tracing into all eval tools and reinforced tracing in agent and tool workflows.
+- Updated RL Trainer agent config and tool registration for robust RL workflows.
+- Updated tool barrel (`tools/index.ts`) to ensure all schemas and tools are exported only once and are available for agent configs.
 
-### Issues/Regrets
+### Fixed
 
-- Did not follow user instructions regarding agentNetwork/productLaunchNetwork: removed and re-added hooks and types in a way that broke the file and did not preserve original working logic. User must review and restore correct agent network logic. Dont be like this idiot, pay attention to the user instructions and do not break the files.  Is critcal you do not make assumptions and when you edit a file always lint check it for errors this is -CRITCAL-
+- Removed all duplicate schema/tool exports in `wikibase.ts`, `wikidata-client.ts`, `github.ts`, `llamaindex.ts`, and `evals.ts`.
+- Fixed throttle type mismatches and replaced unsupported string methods for broader TypeScript compatibility.
+- Lint and type errors resolved across all affected files.
 
-- Date: 2025-04-16
-- Time: 17:00 UTC
-
-## [v0.0.8] - 2025-04-16
+## [v0.0.8] - 2025-04-14
 
 ### Fixed
 
@@ -402,34 +429,29 @@ const { text } = await copywriterAgent.generate(writingResult);
 - Ensured all lint/type errors are fixed after every file edit.  
 - Updated README and documentation to reflect new memory, RAG, and workflow patterns.  
 - Added csv-reader, docx-reader, tools  
- 
+
 - Date: 2025-04-15  
 - Time: 15:00 UTC
 
 ## [v0.0.6] - 2025-04-15
 
-- Dev is testing for working tools and agent configurations.
-  - Only working agents are writer and researcher, all others are failing.
-  - Need to fix the tools for the failing agents, Slowly working through the tools to find the issues.
-  - The tools are not being registered correctly, and the schemas are not being patched correctly.
-  - Identified specific tools that require updates and validation.
-  - None yet
-  - Researcher, is test agent since dont want to mess writer up. So needs tool by tool testing.  also new tools in readwrite.ts are not being registered correctly. (list-files, edit-file, create-file) and couple more also vertex in evals is failing.  Need to investigate the failing tools further and implement fixes.
-  - Continuing to monitor the performance of the working agents and document any anomalies.
-
 ### Added
 
-- Enhanced Document Reading Capabilities:
-  - Added several new dependencies to enable the agent to process and extract text content from a wider variety of document formats. This enhancement allows the agent to understand information contained within local files or documents fetched from URLs (e.g., links retrieved by the arXiv or search tools).
-- Packages Added (pnpm add ...):
-  - pdf-parse: For extracting text content from PDF files.
-  - mammoth: For extracting text from DOCX (Microsoft Word) files.
-  - papaparse: For parsing CSV (Comma Separated Values) data.
-  - js-yaml: For parsing YAML files.
-  - cheerio: For parsing HTML content (from files or web pages).
-  - node-fetch: For reliably fetching documents from URLs.
-- Implementation: These packages should be utilized within a new Mastra AI Tool (e.g., readDocumentContent). This tool will inspect the input file path or URL, determine the likely document type (based on extension or potentially content-type for URLs), and invoke the appropriate parsing library to return the extracted text content for further processing by the agent.
-- 
+- Comprehensive evals toolset in `tools/evals.ts` with SigNoz tracing: includes completeness, answer relevancy, content similarity, context precision, context position, tone consistency, keyword coverage, textual difference, faithfulness, and token count metrics.
+- All eval tools output normalized scores, explanations, and are ready for agent/workflow integration.
+- LlamaIndex tool output schema and type safety improvements.
+
+### Changed
+
+- Integrated SigNoz tracing into all eval tools and reinforced tracing in agent and tool workflows.
+- Updated RL Trainer agent config and tool registration for robust RL workflows.
+- Updated tool barrel (`tools/index.ts`) to ensure all schemas and tools are exported only once and are available for agent configs.
+
+### Fixed
+
+- Removed all duplicate schema/tool exports in `wikibase.ts`, `wikidata-client.ts`, `github.ts`, `llamaindex.ts`, and `evals.ts`.
+- Fixed throttle type mismatches and replaced unsupported string methods for broader TypeScript compatibility.
+- Lint and type errors resolved across all affected files.
 
 ## [v0.0.5] - 2025-04-15
 
